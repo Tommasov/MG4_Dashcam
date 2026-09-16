@@ -19,7 +19,7 @@ public class DashcamEventTriggerReceiver extends BroadcastReceiver {
             return;
         }
 
-        boolean dashcamRunning = UiPrefs.getPrefs(context).getBoolean(DashcamSettingsController.KEY_ENABLED, false)
+        boolean dashcamRunning = UiPrefs.getPrefs(context).getBoolean(DashcamSettings.KEY_ENABLED, false)
                 && RecordingService.isRunning();
         DevRuntimeLog.add(
                 "DashcamEventTriggerReceiver",

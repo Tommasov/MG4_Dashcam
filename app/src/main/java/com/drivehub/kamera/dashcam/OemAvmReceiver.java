@@ -3,7 +3,6 @@ package com.drivehub.kamera.dashcam;
 import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.helper.vehiclesensors.VehicleSpeedReader;
 import com.drivehub.kamera.settings.UiPrefs;
-import com.drivehub.kamera.signal.SignalService;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -54,13 +53,11 @@ public class OemAvmReceiver extends BroadcastReceiver {
                 return;
             }
             Log.i(TAG, "OEM AVM start/launch received: " + action);
-            SignalService.setOemAvmActive(context, true);
             RecordingService.pauseForOemRequest(context);
             return;
         }
         if (ACTION_AVM_STOP.equals(action)) {
             Log.i(TAG, "OEM AVM stop received");
-            SignalService.setOemAvmActive(context, false);
             RecordingService.resumeAfterOemRequest(context);
         }
     }

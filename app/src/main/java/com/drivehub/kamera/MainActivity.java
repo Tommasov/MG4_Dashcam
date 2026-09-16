@@ -1,378 +1,399 @@
 package com.drivehub.kamera;
 
-import com.drivehub.kamera.camera.CameraIndex;
-import com.drivehub.kamera.camera.OverlayService;
-import com.drivehub.kamera.dashcam.DashcamSettingsController;
+import com.drivehub.kamera.dashcam.DashcamSettings;
+import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
-import com.drivehub.kamera.ota.OtaController;
-import com.drivehub.kamera.settings.SettingsAppearanceController;
-import com.drivehub.kamera.settings.SettingsDialogController;
 import com.drivehub.kamera.settings.UiPrefs;
-import com.drivehub.kamera.signal.SignalService;
 
-import android.annotation.SuppressLint;
+import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.view.MotionEvent;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
-import android.view.View;
-import android.widget.Button;
-import android.widget.ImageButton;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.RadioGroup;
 import android.widget.TextView;
+import android.widget.Toast;
 
-import androidx.activity.EdgeToEdge;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 
-public class MainActivity extends AppCompatActivity implements SurfaceHolder.Callback {
+import java.io.File;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-    private static final int SWIPE_THRESHOLD_PX = 140;
+/**
+ * The whole user interface: a switch that arms the loop, the recording parameters, and where
+ * the clips go. Everything else the upstream app put on screen is gone.
+ */
+public class MainActivity extends AppCompatActivity {
 
-    private SurfaceHolder surfaceHolder;
+    private static final int REQ_STORAGE = 1337;
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+
+    private SwitchCompat swEnabled;
     private TextView tvStatus;
-    private View recordingStatusPill;
-    private View recordingStatusDot;
-    private TextView tvRecordingStatus;
-    private Button btnRecordTestClip;
-    private int currentVideoIndex = CameraIndex.FRONT.getVideoIndex();
-    private int activePreviewCameraIndex = -1;
-    private boolean previewRunning = false;
-    private boolean previewPausedForTestClip = false;
-    private float downX = 0f;
-    private float downY = 0f;
+    private TextView tvStorageStatus;
+    private RadioGroup rgStorageTarget;
+    private EditText etRecordsPath;
+    private EditText etRetentionInternal;
+    private EditText etRetentionUsb;
+    private EditText etMaxEventDirs;
+    private EditText etFps;
+    private EditText etSignature;
+    private SwitchCompat swShowSpeed;
+    private SwitchCompat swOemCoexist;
+    private CheckBox cbFront;
+    private CheckBox cbRear;
+    private CheckBox cbLeft;
+    private CheckBox cbRight;
 
-    private static volatile boolean sMainVisible = false;
-    private static volatile boolean sSettingsDialogOpen = false;
-    private final SettingsAppearanceController appearanceController = new SettingsAppearanceController(this);
-    private final OtaController otaController = new OtaController(this);
-    private final SettingsDialogController settingsDialog = new SettingsDialogController(
-            this, appearanceController, otaController, this::applyWarningVisibility);
+    private boolean syncing = false;
 
-    public static void setSettingsDialogOpen(boolean open) {
-        sSettingsDialogOpen = open;
-    }
-
-    public static boolean isSettingsDialogOpen() {
-        return sSettingsDialogOpen;
-    }
-
-    private final BroadcastReceiver cameraRouteReceiver = new BroadcastReceiver() {
+    private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (intent == null) return;
-            if (!SignalService.ACTION_ROUTE_CAMERA.equals(intent.getAction())) return;
-            int idx = intent.getIntExtra(SignalService.EXTRA_CAMERA_INDEX, currentVideoIndex);
-            if (idx == currentVideoIndex) return;
-            currentVideoIndex = idx;
-            if (tvStatus != null) {
-                tvStatus.setText(getString(R.string.main_preview_status, cameraLabel(currentVideoIndex)));
-            }
-            startPreviewIfReady();
+            refreshStatus();
         }
     };
 
-    private final BroadcastReceiver recordingStatusReceiver = new BroadcastReceiver() {
+    private final BroadcastReceiver ejectReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (intent == null) return;
-            if (!RecordingService.ACTION_STATUS_CHANGED.equals(intent.getAction())) return;
-            renderRecordingStatus(
-                    intent.getStringExtra(RecordingService.EXTRA_STATUS),
-                    intent.getIntExtra(RecordingService.EXTRA_ACTIVE_CAMERAS, 0),
-                    intent.getIntExtra(RecordingService.EXTRA_TOTAL_CAMERAS, 4),
-                    intent.getStringExtra(RecordingService.EXTRA_LAST_ERROR)
-            );
+            int messageRes = intent.getIntExtra(
+                    RecordingService.EXTRA_USB_EJECT_MESSAGE_RES,
+                    R.string.settings_dashcam_storage_eject_unavailable_message);
+            Toast.makeText(MainActivity.this, messageRes, Toast.LENGTH_LONG).show();
+            syncing = true;
+            swEnabled.setChecked(DashcamSettings.isEnabled(prefs()));
+            syncing = false;
+            refreshStatus();
+            refreshStorageStatus();
         }
     };
 
-    public static boolean isMainVisible() {
-        return sMainVisible;
-    }
-
-    public static boolean shouldBlockOverlay() {
-        return sMainVisible && !sSettingsDialogOpen;
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
-        UiPrefs.migrateLegacyPrefsIfNeeded(this);
         setContentView(R.layout.activity_main);
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
 
-        SurfaceView surfaceView = findViewById(R.id.surfaceView);
-        surfaceHolder = surfaceView.getHolder();
-        surfaceHolder.addCallback(this);
-
+        swEnabled = findViewById(R.id.swEnabled);
         tvStatus = findViewById(R.id.tvStatus);
-        if (tvStatus != null) {
-            tvStatus.setText(getString(R.string.main_preview_status, cameraLabel(currentVideoIndex)));
-        }
-        recordingStatusPill = findViewById(R.id.recordingStatusPill);
-        recordingStatusDot = findViewById(R.id.recordingStatusDot);
-        tvRecordingStatus = findViewById(R.id.tvRecordingStatus);
+        tvStorageStatus = findViewById(R.id.tvStorageStatus);
+        rgStorageTarget = findViewById(R.id.rgStorageTarget);
+        etRecordsPath = findViewById(R.id.etRecordsPath);
+        etRetentionInternal = findViewById(R.id.etRetentionInternal);
+        etRetentionUsb = findViewById(R.id.etRetentionUsb);
+        etMaxEventDirs = findViewById(R.id.etMaxEventDirs);
+        etFps = findViewById(R.id.etFps);
+        etSignature = findViewById(R.id.etSignature);
+        swShowSpeed = findViewById(R.id.swShowSpeed);
+        swOemCoexist = findViewById(R.id.swOemCoexist);
+        cbFront = findViewById(R.id.cbFront);
+        cbRear = findViewById(R.id.cbRear);
+        cbLeft = findViewById(R.id.cbLeft);
+        cbRight = findViewById(R.id.cbRight);
 
-        ImageButton btnSettings = findViewById(R.id.btnSettings);
-        btnSettings.setOnClickListener(v -> settingsDialog.show());
+        findViewById(R.id.btnTestClip).setOnClickListener(v -> {
+            SharedPreferences prefs = prefs();
+            RecordingService.startTestClip(this, DashcamSettings.getTestRecordDurationSec(prefs));
+        });
 
-        ImageButton btnClose = findViewById(R.id.btnClose);
-        btnClose.setOnClickListener(v -> finishAndRemoveTask());
+        // Stops the loop and waits for the pending writes so the stick can be pulled without
+        // truncating the clip that was in flight.
+        findViewById(R.id.btnEjectUsb).setOnClickListener(v -> {
+            DashcamSettings.setEnabled(prefs(), false);
+            syncing = true;
+            swEnabled.setChecked(false);
+            syncing = false;
+            RecordingService.requestUsbEject(this);
+        });
 
-        btnRecordTestClip = findViewById(R.id.btnRecordTestClip);
-        btnRecordTestClip.setOnClickListener(v -> {
-            SharedPreferences prefs = UiPrefs.getPrefs(this);
-            if (!DashcamSettingsController.isTestRecordEnabled(prefs)) {
-                return;
-            }
-            int testDurationSec = DashcamSettingsController.getTestRecordDurationSec(prefs);
-            renderRecordingStatus(RecordingService.STATUS_STARTING, 0, 4, "");
-            btnRecordTestClip.setEnabled(false);
-            btnRecordTestClip.setText(getString(R.string.main_button_record_test_running, testDurationSec));
-            previewPausedForTestClip = true;
-            stopPreview();
+        findViewById(R.id.btnStorageDetails).setOnClickListener(v -> showStorageDetails());
+
+        bind();
+        ensureStoragePermission();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ContextCompat.registerReceiver(
+                this,
+                statusReceiver,
+                new IntentFilter(RecordingService.ACTION_STATUS_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(
+                this,
+                ejectReceiver,
+                new IntentFilter(RecordingService.ACTION_USB_EJECT_READY),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+        RecordingService.resetPersistedStatusIfStale(prefs());
+        refreshStatus();
+        refreshStorageStatus();
+    }
+
+    @Override
+    protected void onPause() {
+        for (BroadcastReceiver receiver : new BroadcastReceiver[] { statusReceiver, ejectReceiver }) {
             try {
-                RecordingService.startTestClip(this, testDurationSec);
-            } catch (Throwable t) {
-                renderRecordingStatus(RecordingService.STATUS_ERROR, 0, 4, t.getClass().getSimpleName());
+                unregisterReceiver(receiver);
+            } catch (IllegalArgumentException ignored) {
+                // not registered
             }
-        });
-
-        Button btnTriggerEventSave = findViewById(R.id.btnTriggerEventSave);
-        btnTriggerEventSave.setOnClickListener(v -> RecordingService.triggerEventSaveOrFutureOnly(this));
-
-        applyStoredRecordingStatus();
-        refreshTestRecordButtonState();
-
-        appearanceController.applyMainUiIconColors();
-        applyWarningVisibility();
-
-        try {
-            SignalService.start(this);
-        } catch (Throwable ignored) {
         }
-
-        surfaceView.setOnTouchListener((v, event) -> {
-            if (event == null) return false;
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                    downX = event.getX();
-                    downY = event.getY();
-                    return true;
-                case MotionEvent.ACTION_UP:
-                    float dx = event.getX() - downX;
-                    float dy = event.getY() - downY;
-                    if (Math.abs(dx) > Math.abs(dy)) {
-                        if (dx > SWIPE_THRESHOLD_PX) currentVideoIndex = CameraIndex.RIGHT.getVideoIndex();
-                        else if (dx < -SWIPE_THRESHOLD_PX) currentVideoIndex = CameraIndex.LEFT.getVideoIndex();
-                        else return true;
-                    } else {
-                        if (dy < -SWIPE_THRESHOLD_PX) currentVideoIndex = CameraIndex.FRONT.getVideoIndex();
-                        else if (dy > SWIPE_THRESHOLD_PX) currentVideoIndex = CameraIndex.REAR.getVideoIndex();
-                        else return true;
-                    }
-                    if (tvStatus != null) {
-                        tvStatus.setText(getString(R.string.main_preview_status, cameraLabel(currentVideoIndex)));
-                    }
-                    startPreviewIfReady();
-                    return true;
-            }
-            return false;
-        });
-    }
-
-    @Override
-    protected void onStart() {
-        super.onStart();
-        sMainVisible = true;
-        try {
-            ContextCompat.registerReceiver(
-                    this,
-                    cameraRouteReceiver,
-                    new IntentFilter(SignalService.ACTION_ROUTE_CAMERA),
-                    ContextCompat.RECEIVER_NOT_EXPORTED
-            );
-            ContextCompat.registerReceiver(
-                    this,
-                    recordingStatusReceiver,
-                    new IntentFilter(RecordingService.ACTION_STATUS_CHANGED),
-                    ContextCompat.RECEIVER_NOT_EXPORTED
-            );
-        } catch (Throwable ignored) {
-        }
-        OverlayService.hideOverlay(this);
-        applyWarningVisibility();
-        applyStoredRecordingStatus();
-        refreshTestRecordButtonState();
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        sMainVisible = false;
-        sSettingsDialogOpen = false;
-        // Re-apply signal/rearview overlay state once MainActivity stops blocking it.
-        SignalService.requestRecheck();
-        otaController.stop();
-        try {
-            unregisterReceiver(cameraRouteReceiver);
-        } catch (Throwable ignored) {
-        }
-        try {
-            unregisterReceiver(recordingStatusReceiver);
-        } catch (Throwable ignored) {
-        }
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        ioExecutor.shutdownNow();
         super.onDestroy();
-        sMainVisible = false;
-        otaController.stop();
-        stopPreview();
     }
 
-    private void applyWarningVisibility() {
-        boolean show = UiPrefs.isSafetyWarningEnabled(UiPrefs.getPrefs(this));
-        int visibility = show ? View.VISIBLE : View.GONE;
-        View bg = findViewById(R.id.bg_tishi);
-        View banner = findViewById(R.id.warningBanner);
-        if (bg != null) bg.setVisibility(visibility);
-        if (banner != null) banner.setVisibility(visibility);
-    }
+    // ---------- Binding ----------
 
-    private void applyStoredRecordingStatus() {
-        SharedPreferences prefs = UiPrefs.getPrefs(this);
-        RecordingService.resetPersistedStatusIfStale(prefs);
-        RecordingService.PersistedStatus s = RecordingService.readPersistedStatus(prefs);
-        renderRecordingStatus(s.status, s.activeCameras, s.totalCameras, s.lastError);
-    }
+    private void bind() {
+        SharedPreferences prefs = prefs();
+        syncing = true;
 
-    private void renderRecordingStatus(String status, int activeCameras, int totalCameras, String lastError) {
-        if (recordingStatusPill == null || recordingStatusDot == null || tvRecordingStatus == null) return;
-        if (status == null || RecordingService.STATUS_OFF.equals(status)) {
-            recordingStatusPill.setVisibility(View.GONE);
-            resetTestClipButton();
-            restartPreviewAfterTestClipIfNeeded();
-        } else {
-            recordingStatusPill.setVisibility(View.VISIBLE);
-            if (RecordingService.STATUS_RECORDING.equals(status)) {
-                if (btnRecordTestClip != null) btnRecordTestClip.setEnabled(false);
-                recordingStatusDot.setVisibility(View.VISIBLE);
-                tvRecordingStatus.setText(getString(R.string.main_recording_indicator, activeCameras, totalCameras));
-            } else if (RecordingService.STATUS_PAUSED_OEM.equals(status)) {
-                if (btnRecordTestClip != null) btnRecordTestClip.setEnabled(false);
-                recordingStatusDot.setVisibility(View.GONE);
-                tvRecordingStatus.setText(R.string.main_recording_paused_oem);
-            } else if (RecordingService.STATUS_STARTING.equals(status)) {
-                if (btnRecordTestClip != null) btnRecordTestClip.setEnabled(false);
-                recordingStatusDot.setVisibility(View.VISIBLE);
-                tvRecordingStatus.setText(R.string.main_recording_starting);
+        swEnabled.setChecked(DashcamSettings.isEnabled(prefs));
+        swShowSpeed.setChecked(DashcamSettings.shouldShowSpeed(prefs));
+        swOemCoexist.setChecked(UiPrefs.isOemAvmCoexistEnabled(prefs));
+
+        int mask = DashcamSettings.getRecordingCameraMask(prefs);
+        cbFront.setChecked((mask & DashcamSettings.CAMERA_MASK_FRONT) != 0);
+        cbRear.setChecked((mask & DashcamSettings.CAMERA_MASK_REAR) != 0);
+        cbLeft.setChecked((mask & DashcamSettings.CAMERA_MASK_LEFT) != 0);
+        cbRight.setChecked((mask & DashcamSettings.CAMERA_MASK_RIGHT) != 0);
+
+        rgStorageTarget.check(radioIdForTarget(DashcamStorageManager.getStorageTarget(prefs)));
+
+        etRecordsPath.setText(DashcamSettings.getConfiguredRecordsPath(prefs));
+        etRecordsPath.setHint(DashcamSettings.getDefaultRecordsBaseDir().getAbsolutePath());
+        etRetentionInternal.setText(String.valueOf(DashcamSettings.getRetentionClipCount(prefs)));
+        etRetentionUsb.setText(String.valueOf(DashcamStorageManager.getUsbRetentionClipCount(prefs)));
+        etMaxEventDirs.setText(String.valueOf(DashcamSettings.getMaxRetainedEventDirs(prefs)));
+        etFps.setText(String.valueOf(DashcamSettings.getRecordingFps(prefs)));
+        etSignature.setText(DashcamSettings.getRecordingSignature(prefs));
+
+        syncing = false;
+
+        swEnabled.setOnCheckedChangeListener((v, checked) -> {
+            if (syncing) return;
+            DashcamSettings.setEnabled(prefs(), checked);
+            if (checked) {
+                RecordingService.startIfDashcamEnabled(this);
             } else {
-                if (activeCameras <= 0) resetTestClipButton();
-                recordingStatusDot.setVisibility(View.GONE);
-                String error = lastError == null || lastError.trim().isEmpty() ? status : lastError.trim();
-                tvRecordingStatus.setText(getString(R.string.main_recording_error, error));
-                if (activeCameras <= 0) restartPreviewAfterTestClipIfNeeded();
+                RecordingService.stopIfRunning(this);
             }
+            refreshStatus();
+        });
+        swShowSpeed.setOnCheckedChangeListener((v, checked) -> {
+            if (!syncing) DashcamSettings.setShowSpeed(prefs(), checked);
+        });
+        swOemCoexist.setOnCheckedChangeListener((v, checked) -> {
+            if (!syncing) UiPrefs.setOemAvmCoexistEnabled(prefs(), checked);
+        });
+
+        CheckBox[] cameraBoxes = { cbFront, cbRear, cbLeft, cbRight };
+        for (CheckBox box : cameraBoxes) {
+            box.setOnCheckedChangeListener((v, checked) -> {
+                if (syncing) return;
+                saveCameraMask();
+            });
         }
-        settingsDialog.onRecordingStatusChanged(status, activeCameras, totalCameras, lastError);
+
+        rgStorageTarget.setOnCheckedChangeListener((group, checkedId) -> {
+            if (syncing) return;
+            DashcamStorageManager.setStorageTarget(prefs(), targetForRadioId(checkedId));
+            refreshStorageStatus();
+        });
+
+        onBlur(etRecordsPath, () -> {
+            DashcamSettings.setConfiguredRecordsPath(prefs(), etRecordsPath.getText().toString());
+            refreshStorageStatus();
+        });
+        onBlur(etRetentionInternal, () -> {
+            DashcamSettings.setRetentionClipCount(prefs(), readInt(etRetentionInternal,
+                    DashcamSettings.DEFAULT_RETENTION_CLIP_COUNT));
+            etRetentionInternal.setText(String.valueOf(DashcamSettings.getRetentionClipCount(prefs())));
+        });
+        onBlur(etRetentionUsb, () -> {
+            DashcamStorageManager.setUsbRetentionClipCount(prefs(), readInt(etRetentionUsb,
+                    DashcamStorageManager.DEFAULT_USB_RETENTION_CLIP_COUNT));
+            etRetentionUsb.setText(String.valueOf(DashcamStorageManager.getUsbRetentionClipCount(prefs())));
+        });
+        onBlur(etMaxEventDirs, () -> {
+            DashcamSettings.setMaxRetainedEventDirs(prefs(), readInt(etMaxEventDirs,
+                    DashcamSettings.DEFAULT_MAX_RETAINED_EVENT_DIRS));
+            etMaxEventDirs.setText(String.valueOf(DashcamSettings.getMaxRetainedEventDirs(prefs())));
+        });
+        onBlur(etFps, () -> {
+            DashcamSettings.setRecordingFps(prefs(), readInt(etFps, DashcamSettings.DEFAULT_RECORDING_FPS));
+            etFps.setText(String.valueOf(DashcamSettings.getRecordingFps(prefs())));
+        });
+        onBlur(etSignature, () -> {
+            DashcamSettings.setRecordingSignature(prefs(), etSignature.getText().toString());
+            etSignature.setText(DashcamSettings.getRecordingSignature(prefs()));
+        });
     }
 
-    private void resetTestClipButton() {
-        if (btnRecordTestClip == null) return;
-        SharedPreferences prefs = UiPrefs.getPrefs(this);
-        boolean enabled = DashcamSettingsController.isTestRecordEnabled(prefs);
-        int durationSec = DashcamSettingsController.getTestRecordDurationSec(prefs);
-        btnRecordTestClip.setVisibility(enabled ? View.VISIBLE : View.GONE);
-        btnRecordTestClip.setEnabled(enabled);
-        btnRecordTestClip.setText(getString(R.string.main_button_record_test_30s, durationSec));
+    private void saveCameraMask() {
+        int mask = 0;
+        if (cbFront.isChecked()) mask |= DashcamSettings.CAMERA_MASK_FRONT;
+        if (cbRear.isChecked()) mask |= DashcamSettings.CAMERA_MASK_REAR;
+        if (cbLeft.isChecked()) mask |= DashcamSettings.CAMERA_MASK_LEFT;
+        if (cbRight.isChecked()) mask |= DashcamSettings.CAMERA_MASK_RIGHT;
+        DashcamSettings.setRecordingCameraMask(prefs(), mask);
+        // An empty selection falls back to all four, so mirror whatever was actually stored.
+        syncing = true;
+        int stored = DashcamSettings.getRecordingCameraMask(prefs());
+        cbFront.setChecked((stored & DashcamSettings.CAMERA_MASK_FRONT) != 0);
+        cbRear.setChecked((stored & DashcamSettings.CAMERA_MASK_REAR) != 0);
+        cbLeft.setChecked((stored & DashcamSettings.CAMERA_MASK_LEFT) != 0);
+        cbRight.setChecked((stored & DashcamSettings.CAMERA_MASK_RIGHT) != 0);
+        syncing = false;
     }
 
-    public void refreshTestRecordButtonState() {
-        if (btnRecordTestClip == null) return;
-        SharedPreferences prefs = UiPrefs.getPrefs(this);
-        boolean settingEnabled = DashcamSettingsController.isTestRecordEnabled(prefs);
-        int durationSec = DashcamSettingsController.getTestRecordDurationSec(prefs);
-        btnRecordTestClip.setVisibility(settingEnabled ? View.VISIBLE : View.GONE);
-        // A running test clip owns the button's enabled state and label — set by the click
-        // handler, cleared via renderRecordingStatus(STATUS_OFF) → resetTestClipButton().
-        if (previewPausedForTestClip) {
+    /**
+     * Prints the storage probe's own account of itself into the screen.
+     *
+     * Where a volume may be written is not something this code can reason about from a rule:
+     * on this vehicle the root of /storage/UUID refuses writes while the same volume's raw
+     * mount accepts them, and other firmware will differ again. When that goes wrong the only
+     * useful answer is what the probe actually saw, and the head unit has no adb to ask.
+     */
+    private void showStorageDetails() {
+        TextView details = findViewById(R.id.tvStorageDetails);
+        details.setText(R.string.storage_details_working);
+        ioExecutor.execute(() -> {
+            String text;
+            try {
+                text = DashcamStorageManager.describeProbe(this);
+            } catch (Throwable t) {
+                text = String.valueOf(t);
+            }
+            final String finalText = text;
+            mainHandler.post(() -> details.setText(finalText));
+        });
+    }
+
+    // ---------- Status ----------
+
+    private void refreshStatus() {
+        RecordingService.PersistedStatus s = RecordingService.readPersistedStatus(prefs());
+        tvStatus.setText(RecordingService.formatStatusText(
+                this, s.status, s.activeCameras, s.totalCameras, s.lastError));
+    }
+
+    /** {@link DashcamStorageManager#resolve} does real IO for the USB targets. */
+    private void refreshStorageStatus() {
+        tvStorageStatus.setText(R.string.storage_status_checking);
+        ioExecutor.execute(() -> {
+            final DashcamStorageManager.Resolution res = DashcamStorageManager.resolve(this);
+            mainHandler.post(() -> applyStorageStatus(res));
+        });
+    }
+
+    private void applyStorageStatus(DashcamStorageManager.Resolution res) {
+        if (isFinishing() || isDestroyed()) {
             return;
         }
-        String status = RecordingService.readPersistedStatus(prefs).status;
-        boolean recordingInProgress = RecordingService.STATUS_RECORDING.equals(status)
-                || RecordingService.STATUS_STARTING.equals(status)
-                || RecordingService.STATUS_PAUSED_OEM.equals(status);
-        btnRecordTestClip.setText(getString(R.string.main_button_record_test_30s, durationSec));
-        btnRecordTestClip.setEnabled(settingEnabled && !recordingInProgress);
-    }
-
-    private void restartPreviewAfterTestClipIfNeeded() {
-        if (!previewPausedForTestClip) return;
-        previewPausedForTestClip = false;
-        startPreviewIfReady();
-    }
-
-    private void startPreviewIfReady() {
-        if (surfaceHolder == null || surfaceHolder.getSurface() == null ||
-                !surfaceHolder.getSurface().isValid()) {
-            if (tvStatus != null) tvStatus.setText(R.string.main_surface_not_ready);
+        if (res.baseDir == null) {
+            tvStorageStatus.setText(getString(R.string.storage_status_unavailable, res.usbState.name()));
             return;
         }
-        if (activePreviewCameraIndex != -1 && activePreviewCameraIndex != currentVideoIndex) {
-            CameraProbe.detachPreview(activePreviewCameraIndex);
-            activePreviewCameraIndex = -1;
+        File dir = res.baseDir;
+        tvStorageStatus.setText(res.usingUsb
+                ? getString(R.string.storage_status_usb, dir.getAbsolutePath())
+                : getString(R.string.storage_status_internal, dir.getAbsolutePath(), res.usbState.name()));
+    }
+
+    // ---------- Helpers ----------
+
+    private SharedPreferences prefs() {
+        return UiPrefs.getPrefs(this);
+    }
+
+    private static int radioIdForTarget(int target) {
+        switch (target) {
+            case DashcamStorageManager.TARGET_AUTO:
+                return R.id.rbStorageAuto;
+            case DashcamStorageManager.TARGET_USB_ONLY:
+                return R.id.rbStorageUsb;
+            default:
+                return R.id.rbStorageInternal;
         }
-        boolean ok = CameraProbe.attachPreview(currentVideoIndex, surfaceHolder.getSurface());
-        previewRunning = ok;
-        activePreviewCameraIndex = ok ? currentVideoIndex : -1;
-        if (tvStatus != null) {
-            tvStatus.setText(ok
-                    ? getString(R.string.main_preview_status, cameraLabel(currentVideoIndex))
-                    : getString(R.string.main_preview_stopped));
+    }
+
+    private static int targetForRadioId(int radioId) {
+        if (radioId == R.id.rbStorageAuto) {
+            return DashcamStorageManager.TARGET_AUTO;
+        }
+        if (radioId == R.id.rbStorageUsb) {
+            return DashcamStorageManager.TARGET_USB_ONLY;
+        }
+        return DashcamStorageManager.TARGET_INTERNAL_ONLY;
+    }
+
+    private static int readInt(EditText editText, int fallback) {
+        try {
+            return Integer.parseInt(editText.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 
-    private void stopPreview() {
-        if (activePreviewCameraIndex == -1) return;
-        CameraProbe.detachPreview(activePreviewCameraIndex);
-        activePreviewCameraIndex = -1;
-        previewRunning = false;
-        if (tvStatus != null) tvStatus.setText(R.string.main_preview_stopped);
+    /** Commits on focus loss rather than on every keystroke. */
+    private void onBlur(EditText editText, Runnable commit) {
+        editText.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus && !syncing) {
+                commit.run();
+            }
+        });
+        editText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                // Intentionally empty: values are committed on blur.
+            }
+        });
+    }
+
+    private void ensureStoragePermission() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        requestPermissions(new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, REQ_STORAGE);
     }
 
     @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        startPreviewIfReady();
-    }
-
-    @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        stopPreview();
-    }
-
-    private String cameraLabel(int videoIndex) {
-        CameraIndex ci = CameraIndex.fromVideoIndex(videoIndex);
-        return ci != null
-                ? getString(ci.getLabelResId())
-                : getString(R.string.main_camera_label_unknown, videoIndex);
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+            @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_STORAGE) {
+            refreshStorageStatus();
+        }
     }
 }

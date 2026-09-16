@@ -4,20 +4,21 @@
     android:sharedUserId="android.uid.system"
     android:sharedUserMaxSdkVersion="32">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The system shared user above is what lets the native library open /dev/video*.
+         It only takes effect if the APK is signed with the head unit's platform key. -->
+
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Declare camera permission but mark the hardware feature as optional
          to avoid Play Store filtering – this device has physical cameras. -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+    <!-- Read by VehicleSpeedReader for the footer speed. -->
     <uses-permission
         android:name="android.car.permission.CAR_VENDOR_EXTENSION"
         tools:ignore="ProtectedPermissions" />
@@ -41,29 +42,10 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".camera.TileViewActivity"
-            android:exported="false"
-            android:launchMode="singleTop" />
-
         <service
             android:name=".dashcam.RecordingService"
             android:exported="false"
             android:foregroundServiceType="camera" />
-
-        <service
-            android:name=".camera.OverlayService"
-            android:exported="false"
-            android:foregroundServiceType="camera" />
-
-        <service
-            android:name=".dashcam.DashcamEventOverlayService"
-            android:exported="false" />
-
-        <service
-            android:name=".signal.SignalService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
 
         <receiver
             android:name=".boot.BootReceiver"
@@ -74,6 +56,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- Yields the camera devices while the factory 360/reverse view is on screen. -->
         <receiver
             android:name=".dashcam.OemAvmReceiver"
             android:enabled="true"
@@ -85,21 +68,14 @@
             </intent-filter>
         </receiver>
 
+        <!-- External event trigger. Senders must target this fork's package, not upstream's:
+             new Intent(ACTION).setPackage("com.tommasov.mg4dashcam"). -->
         <receiver
             android:name=".dashcam.DashcamEventTriggerReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.drivehub.kamera.action.TRIGGER_DASHCAM_EVENT" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name=".signal.DigitalRearviewTriggerReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.drivehub.kamera.action.SET_DIGITAL_REARVIEW" />
             </intent-filter>
         </receiver>
     </application>

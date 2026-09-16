@@ -1,7 +1,6 @@
 package com.drivehub.kamera.boot;
 
 import com.drivehub.kamera.dashcam.RecordingService;
-import com.drivehub.kamera.signal.SignalService;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -22,12 +21,6 @@ public class BootReceiver extends BroadcastReceiver {
             RecordingService.startIfDashcamEnabled(context);
         } catch (Exception e) {
             Log.w(TAG, "Failed to start RecordingService on boot", e);
-        }
-
-        try {
-            SignalService.start(context);
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to start SignalService on boot", e);
         }
     }
 }

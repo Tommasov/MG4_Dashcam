@@ -1,260 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- H1: primary navigation labels in the settings dialog sidebar. -->
-    <style name="DrivehubSettingsHeading1Tab" parent="">
-        <item name="android:textSize">18sp</item>
-        <item name="android:textStyle">bold</item>
+    <!-- Section divider: a label with room above it. -->
+    <style name="DashcamSectionHeader" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">2dp</item>
-        <item name="android:paddingStart">14dp</item>
-        <item name="android:paddingTop">12dp</item>
-        <item name="android:paddingEnd">14dp</item>
-        <item name="android:paddingBottom">12dp</item>
-        <item name="android:gravity">start|center_vertical</item>
-        <item name="android:background">@android:color/transparent</item>
-    </style>
-
-    <style name="DrivehubSettingsTabActive" parent="@style/DrivehubSettingsHeading1Tab">
-        <item name="android:textColor">@color/settings_accent</item>
-        <item name="android:background">@drawable/bg_settings_tab_active</item>
-    </style>
-
-    <style name="DrivehubSettingsTabInactive" parent="@style/DrivehubSettingsHeading1Tab">
-        <item name="android:textColor">@color/settings_tab_inactive</item>
-    </style>
-
-    <!-- H2: subsection headings inside a settings page. -->
-    <style name="DrivehubSettingsHeading2" parent="">
-        <item name="android:textColor">@color/settings_text_highlight</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:letterSpacing">0.08</item>
+        <item name="android:layout_marginTop">32dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
         <item name="android:textAllCaps">true</item>
-    </style>
-
-    <!-- Primary control labels such as toggles and key settings entries. -->
-    <style name="DrivehubSettingsLabel" parent="">
-        <item name="android:textColor">@color/settings_text_primary</item>
-        <item name="android:textSize">22sp</item>
-    </style>
-
-    <!-- Shared switch treatment for settings screens. Keep size and assets centralized. -->
-    <style name="DrivehubSettingsSwitch" parent="">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:focusable">false</item>
-        <item name="android:scaleX">0.9</item>
-        <item name="android:scaleY">0.9</item>
-        <item name="android:showText">false</item>
-        <item name="android:splitTrack">false</item>
-        <item name="android:switchMinWidth">54dp</item>
-        <item name="android:switchPadding">0dp</item>
-        <item name="android:thumbTextPadding">0dp</item>
-        <item name="android:minHeight">28dp</item>
-        <item name="android:thumb">@drawable/switch_white_circle_selector</item>
-        <item name="android:track">@drawable/switch_selector_green</item>
-    </style>
-
-    <!-- Shared visual sizing for settings sliders. -->
-    <style name="DrivehubSettingsSlider" parent="">
-        <item name="android:layout_height">32dp</item>
-        <item name="android:paddingTop">2dp</item>
-        <item name="android:paddingBottom">2dp</item>
-        <item name="android:progressDrawable">@drawable/settings_slider_track</item>
-        <item name="android:thumb">@drawable/settings_slider_thumb</item>
-        <item name="android:thumbOffset">0dp</item>
-        <item name="android:splitTrack">false</item>
-        <item name="android:focusable">false</item>
-    </style>
-
-    <style name="DrivehubSettingsBannerSlider" parent="@style/DrivehubSettingsSlider">
-        <item name="android:paddingLeft">0dp</item>
-        <item name="android:paddingRight">0dp</item>
-        <item name="android:paddingStart">0dp</item>
-        <item name="android:paddingEnd">0dp</item>
-    </style>
-
-    <!-- Shared compact numeric value next to sliders in settings. -->
-    <style name="DrivehubSettingsSliderValue" parent="">
-        <item name="android:layout_width">72dp</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginStart">10dp</item>
-        <item name="android:gravity">end|center_vertical</item>
-        <item name="android:inputType">number</item>
-        <item name="android:textColor">@color/settings_text_secondary</item>
-        <item name="android:textSize">18sp</item>
-        <item name="android:background">@android:color/transparent</item>
-        <item name="android:focusable">true</item>
-    </style>
-
-    <style name="DrivehubSettingsAccentValue" parent="">
-        <item name="android:gravity">start|center_vertical</item>
-        <item name="android:inputType">textNoSuggestions|textCapCharacters</item>
-        <item name="android:maxLength">9</item>
-        <item name="android:textColor">@color/settings_text_secondary</item>
-        <item name="android:textSize">18sp</item>
-        <item name="android:background">@android:color/transparent</item>
-        <item name="android:focusable">true</item>
-    </style>
-
-    <!-- Body copy used for long-form settings content and helper text. -->
-    <style name="DrivehubSettingsBody" parent="">
-        <item name="android:textColor">@color/settings_text_primary</item>
-        <item name="android:textSize">18sp</item>
-        <item name="android:lineSpacingExtra">1dp</item>
-    </style>
-
-    <style name="DrivehubSettingsChangelogBody" parent="@style/DrivehubSettingsBody">
-        <item name="android:lineSpacingExtra">5dp</item>
-    </style>
-
-    <style name="DrivehubSettingsCreditsBody" parent="@style/DrivehubSettingsBody">
-        <item name="android:textSize">16sp</item>
-        <item name="android:lineSpacingExtra">5dp</item>
-    </style>
-
-    <!-- Secondary explanatory text under controls or in status rows. -->
-    <style name="DrivehubSettingsBodyMuted" parent="">
-        <item name="android:textColor">@color/settings_text_secondary</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:lineSpacingExtra">1dp</item>
-    </style>
-
-    <!-- Small captions such as slider endpoints. -->
-    <style name="DrivehubSettingsCaption" parent="">
-        <item name="android:textColor">@color/settings_text_muted</item>
-        <item name="android:textSize">14sp</item>
-    </style>
-
-    <!-- Small sentence-case label sitting above an inline settings card. -->
-    <style name="DrivehubSettingsCardLabel" parent="">
-        <item name="android:textColor">@color/settings_text_secondary</item>
-        <item name="android:textSize">14sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:letterSpacing">0.02</item>
-        <item name="android:paddingStart">4dp</item>
-    </style>
-
-    <!-- In-card row label — less bulky than the global 22sp label. -->
-    <style name="DrivehubSettingsCardRowLabel" parent="">
-        <item name="android:textColor">@color/settings_text_primary</item>
-        <item name="android:textSize">18sp</item>
-    </style>
-
-    <style name="DrivehubSettingsBannerTitle" parent="">
-        <item name="android:textColor">@color/settings_text_highlight</item>
-        <item name="android:textSize">15sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="DrivehubSettingsBannerValue" parent="">
-        <item name="android:layout_width">44dp</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:gravity">end|center_vertical</item>
-        <item name="android:textColor">@color/settings_text_secondary</item>
+        <item name="android:textColor">@color/settings_accent</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
-    <!-- Version label shown at the bottom of the dialog. -->
-    <style name="DrivehubSettingsFooterVersion" parent="">
-        <item name="android:textColor">@color/settings_text_muted</item>
-        <item name="android:textSize">16sp</item>
-    </style>
-
-    <!-- Red beta badge shown next to the version when beta builds are enabled. -->
-    <style name="DrivehubSettingsFooterBeta" parent="">
-        <item name="android:textColor">@color/settings_beta</item>
-        <item name="android:textSize">10sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <!-- Small author / attribution line below the version. -->
-    <style name="DrivehubSettingsFooterAuthor" parent="">
-        <item name="android:textColor">@color/settings_text_muted</item>
-        <item name="android:textSize">14sp</item>
-    </style>
-
-    <!-- Clickable OTA status badge at the bottom of the settings dialog. -->
-    <style name="DrivehubSettingsFooterTag" parent="">
-        <item name="android:textColor">@color/settings_update_error_text</item>
-        <item name="android:textSize">13sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:paddingLeft">12dp</item>
-        <item name="android:paddingTop">7dp</item>
-        <item name="android:paddingRight">12dp</item>
-        <item name="android:paddingBottom">7dp</item>
-        <item name="android:background">@drawable/bg_settings_footer_tag_neutral</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-    </style>
-
-    <style name="DrivehubDialogButtonPrimary" parent="">
-        <item name="android:background">@drawable/bg_dialog_button_primary</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-        <item name="android:gravity">center</item>
-        <item name="android:minWidth">118dp</item>
-        <item name="android:paddingLeft">16dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingRight">16dp</item>
-        <item name="android:paddingBottom">10dp</item>
-        <item name="android:textColor">@color/settings_text_primary</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="DrivehubDialogButtonSecondary" parent="">
-        <item name="android:background">@drawable/bg_dialog_button_secondary</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-        <item name="android:gravity">center</item>
-        <item name="android:minWidth">118dp</item>
-        <item name="android:paddingLeft">16dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingRight">16dp</item>
-        <item name="android:paddingBottom">10dp</item>
-        <item name="android:textColor">@color/settings_text_secondary</item>
-        <item name="android:textSize">16sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="DrivehubSettingsSegmentGroup" parent="">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">38dp</item>
-        <item name="android:layout_marginStart">4dp</item>
-        <item name="android:background">@drawable/bg_settings_segment_group</item>
-        <item name="android:gravity">center_vertical</item>
-        <item name="android:orientation">horizontal</item>
-        <item name="android:padding">2dp</item>
-    </style>
-
-    <style name="DrivehubSettingsSegmentItem" parent="">
-        <item name="android:layout_width">40dp</item>
-        <item name="android:layout_height">34dp</item>
-        <item name="android:gravity">center</item>
-        <item name="android:textColor">@color/settings_segment_text</item>
-        <item name="android:textSize">14sp</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:clickable">true</item>
-        <item name="android:focusable">true</item>
-    </style>
-
-    <style name="DrivehubSettingsBannerTestButton" parent="@style/DrivehubDialogButtonSecondary">
-        <item name="android:background">@drawable/bg_settings_banner_test_button</item>
-        <item name="android:layout_width">wrap_content</item>
+    <!-- Caption above a text field. -->
+    <style name="DashcamFieldLabel" parent="">
+        <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:minWidth">0dp</item>
-        <item name="android:minHeight">0dp</item>
-        <item name="android:paddingLeft">12dp</item>
-        <item name="android:paddingTop">4dp</item>
-        <item name="android:paddingRight">12dp</item>
-        <item name="android:paddingBottom">4dp</item>
+        <item name="android:layout_marginTop">16dp</item>
+        <item name="android:textColor">@color/settings_text_secondary</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="DashcamField" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">48dp</item>
         <item name="android:textColor">@color/settings_text_primary</item>
-        <item name="android:textSize">11sp</item>
-        <item name="android:textStyle">normal</item>
-        <item name="android:textFontWeight">500</item>
-        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <!-- Switches, checkboxes and radio buttons: one finger-sized row each. -->
+    <style name="DashcamChoice" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">52dp</item>
+        <item name="android:textColor">@color/settings_text_primary</item>
+        <item name="android:textSize">16sp</item>
     </style>
 </resources>

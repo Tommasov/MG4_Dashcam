@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds drop the system shared user.
+
+  The vehicle grants /dev/video* access through android.uid.system, which only works on an APK
+  signed with the head unit's platform key. No emulator image shares that key, so a debug build
+  that kept the attribute could not be installed on one at all — which is the whole point of the
+  MG4_HeadUnit AVD: checking the interface without driving to the car.
+
+  A debug build therefore cannot record. It exists for the screen and for the storage report.
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    tools:remove="android:sharedUserId">
-
-</manifest>
+    tools:remove="android:sharedUserId,android:sharedUserMaxSdkVersion" />

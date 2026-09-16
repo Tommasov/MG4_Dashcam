@@ -1,167 +1,229 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/main"
+<!-- 1920x720 head unit: one scrolling column, generous touch targets, no chrome. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-    <SurfaceView
-        android:id="@+id/surfaceView"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_margin="0dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_margin="8dp"
-        android:text="@string/main_camera_label_right"
-        android:textColor="@android:color/white"
-        android:textSize="12sp"
-        android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+    android:layout_height="match_parent"
+    android:background="@color/settings_surface"
+    android:fillViewport="true">
 
     <LinearLayout
-        android:id="@+id/recordingStatusPill"
-        android:layout_width="wrap_content"
-        android:layout_height="34dp"
-        android:layout_marginTop="18dp"
-        android:layout_marginEnd="22dp"
-        android:background="@drawable/bg_recording_status_pill"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:visibility="gone"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-
-        <View
-            android:id="@+id/recordingStatusDot"
-            android:layout_width="9dp"
-            android:layout_height="9dp"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/bg_recording_status_dot" />
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
 
         <TextView
-            android:id="@+id/tvRecordingStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:singleLine="true"
-            android:textColor="@android:color/white"
-            android:textSize="14sp"
+            android:text="@string/app_name"
+            android:textColor="@color/settings_text_primary"
+            android:textSize="24sp"
             android:textStyle="bold" />
 
-    </LinearLayout>
-
-    <ImageView
-        android:id="@+id/bg_tishi"
-        android:layout_width="0dp"
-        android:layout_height="84dp"
-        android:src="@drawable/bg_tishi"
-        android:scaleType="fitXY"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <RelativeLayout
-        android:id="@+id/warningBanner"
-        android:layout_width="0dp"
-        android:layout_height="84dp"
-        android:gravity="center"
-        app:layout_constraintTop_toTopOf="@id/bg_tishi"
-        app:layout_constraintBottom_toBottomOf="@id/bg_tishi"
-        app:layout_constraintStart_toStartOf="@id/bg_tishi"
-        app:layout_constraintEnd_toEndOf="@id/bg_tishi">
-
-        <ImageView
-            android:id="@+id/eyeImage"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:layout_centerVertical="true"
-            android:layout_marginEnd="12dp"
-            android:src="@drawable/ic_warning_visibility"
-            android:layout_toStartOf="@+id/alertTextView" />
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swEnabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:minHeight="56dp"
+            android:text="@string/dashcam_enabled"
+            android:textColor="@color/settings_text_primary"
+            android:textSize="18sp" />
 
         <TextView
-            android:id="@+id/alertTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/dashcam_enabled_summary"
+            android:textColor="@color/settings_text_secondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/settings_text_highlight"
+            android:textSize="16sp" />
+
+        <!-- Storage -->
+        <TextView
+            style="@style/DashcamSectionHeader"
+            android:text="@string/section_storage" />
+
+        <RadioGroup
+            android:id="@+id/rgStorageTarget"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/rbStorageInternal"
+                style="@style/DashcamChoice"
+                android:text="@string/storage_target_internal" />
+
+            <RadioButton
+                android:id="@+id/rbStorageAuto"
+                style="@style/DashcamChoice"
+                android:text="@string/storage_target_auto" />
+
+            <RadioButton
+                android:id="@+id/rbStorageUsb"
+                style="@style/DashcamChoice"
+                android:text="@string/storage_target_usb" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/tvStorageStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/settings_text_muted"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btnEjectUsb"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_centerInParent="true"
-            android:text="@string/safety_warning_text"
-            android:textColor="@color/white"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:singleLine="true" />
+            android:layout_marginTop="12dp"
+            android:minHeight="52dp"
+            android:text="@string/btn_eject_usb" />
 
-    </RelativeLayout>
+        <TextView
+            style="@style/DashcamFieldLabel"
+            android:text="@string/label_records_path" />
 
-    <ImageButton
-        android:id="@+id/btnSettings"
-        android:layout_width="108dp"
-        android:layout_height="108dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginBottom="16dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@string/main_button_settings"
-        android:padding="24dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_settings_material"
-        android:tint="@color/settings_accent"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        <EditText
+            android:id="@+id/etRecordsPath"
+            style="@style/DashcamField"
+            android:inputType="textUri"
+            android:autofillHints="" />
 
-    <Button
-        android:id="@+id/btnTriggerEventSave"
-        android:layout_width="300dp"
-        android:layout_height="62dp"
-        android:layout_marginBottom="24dp"
-        android:background="@drawable/bg_recording_test_button"
-        android:paddingStart="22dp"
-        android:paddingEnd="22dp"
-        android:text="@string/main_button_trigger_event_save"
-        android:textColor="@android:color/white"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        <TextView
+            style="@style/DashcamFieldLabel"
+            android:text="@string/label_retention_internal" />
 
-    <Button
-        android:id="@+id/btnRecordTestClip"
-        android:layout_width="300dp"
-        android:layout_height="62dp"
-        android:layout_marginBottom="108dp"
-        android:background="@drawable/bg_recording_test_button"
-        android:paddingStart="22dp"
-        android:paddingEnd="22dp"
-        android:text="@string/main_button_record_test_30s"
-        android:textColor="@android:color/white"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        <EditText
+            android:id="@+id/etRetentionInternal"
+            style="@style/DashcamField"
+            android:inputType="number"
+            android:autofillHints="" />
 
-    <ImageButton
-        android:id="@+id/btnClose"
-        android:layout_width="148dp"
-        android:layout_height="148dp"
-        android:layout_marginStart="2dp"
-        android:layout_marginTop="2dp"
-        android:background="@android:color/transparent"
-        android:contentDescription="@string/main_button_close_app"
-        android:padding="34dp"
-        android:scaleType="fitCenter"
-        android:src="@drawable/ic_close"
-        android:tint="#FFFFFF"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        <TextView
+            style="@style/DashcamFieldLabel"
+            android:text="@string/label_retention_usb" />
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+        <EditText
+            android:id="@+id/etRetentionUsb"
+            style="@style/DashcamField"
+            android:inputType="number"
+            android:autofillHints="" />
+
+        <TextView
+            style="@style/DashcamFieldLabel"
+            android:text="@string/label_max_event_dirs" />
+
+        <EditText
+            android:id="@+id/etMaxEventDirs"
+            style="@style/DashcamField"
+            android:inputType="number"
+            android:autofillHints="" />
+
+        <!-- Cameras -->
+        <TextView
+            style="@style/DashcamSectionHeader"
+            android:text="@string/section_cameras" />
+
+        <CheckBox
+            android:id="@+id/cbFront"
+            style="@style/DashcamChoice"
+            android:text="@string/camera_front" />
+
+        <CheckBox
+            android:id="@+id/cbRear"
+            style="@style/DashcamChoice"
+            android:text="@string/camera_rear" />
+
+        <CheckBox
+            android:id="@+id/cbLeft"
+            style="@style/DashcamChoice"
+            android:text="@string/camera_left" />
+
+        <CheckBox
+            android:id="@+id/cbRight"
+            style="@style/DashcamChoice"
+            android:text="@string/camera_right" />
+
+        <!-- Recording -->
+        <TextView
+            style="@style/DashcamSectionHeader"
+            android:text="@string/section_recording" />
+
+        <TextView
+            style="@style/DashcamFieldLabel"
+            android:text="@string/label_fps" />
+
+        <EditText
+            android:id="@+id/etFps"
+            style="@style/DashcamField"
+            android:inputType="number"
+            android:autofillHints="" />
+
+        <TextView
+            style="@style/DashcamFieldLabel"
+            android:text="@string/label_signature" />
+
+        <EditText
+            android:id="@+id/etSignature"
+            style="@style/DashcamField"
+            android:inputType="text"
+            android:autofillHints="" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swShowSpeed"
+            style="@style/DashcamChoice"
+            android:text="@string/label_show_speed" />
+
+        <!-- Vehicle -->
+        <TextView
+            style="@style/DashcamSectionHeader"
+            android:text="@string/section_vehicle" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swOemCoexist"
+            style="@style/DashcamChoice"
+            android:text="@string/label_oem_coexist" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/label_oem_coexist_summary"
+            android:textColor="@color/settings_text_secondary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btnStorageDetails"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:minHeight="56dp"
+            android:text="@string/btn_storage_details" />
+
+        <TextView
+            android:id="@+id/tvStorageDetails"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:textColor="@color/settings_text_muted"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnTestClip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="24dp"
+            android:minHeight="56dp"
+            android:text="@string/btn_test_clip" />
+    </LinearLayout>
+</ScrollView>
