@@ -7,6 +7,10 @@ This is a stripped fork of [jamakr4/MG4-360-Camera-App](https://github.com/jamak
 whose author did the hard part: finding out how to get frames out of this vehicle's cameras at
 all. See [Relationship to upstream](#relationship-to-upstream).
 
+> **Status: early.** It installs on the vehicle, runs as the system user and reads the storage
+> layout correctly; a full recording session has not been confirmed yet. Treat every release as
+> a test build.
+
 ## What it does
 
 - Records front, rear, left and right into a single 1200x800 clip at 25 fps, in 30-second
@@ -82,9 +86,35 @@ Two things worth knowing before turning the retention up:
   constructor in `camera_stream_manager.cpp`). Lowering them means editing and, for the
   canvas, rebuilding the native library.
 
-Recording to a USB stick avoids the eMMC question entirely. Note that upstream forced internal
-storage and left the USB code dormant; this fork re-enables it, but that path has never run in
-a released build, so test it with a real stick before relying on it.
+### Recording to a USB stick
+
+A stick takes the eMMC out of the picture, and this fork can use one. Where the clips land is
+not where you would expect, and the reason is worth knowing before reading either codebase.
+
+Android has refused general write access at the root of a secondary volume since KitKat. On
+this vehicle the same 32 GB stick reports, to the app itself:
+
+    /storage/9EFB-89C8                          r=true  w=false
+    /mnt/media_rw/9EFB-89C8                     r=true  w=true
+    /storage/9EFB-89C8/Android/data/<pkg>/files r=true  w=true
+
+Upstream probes only the first of those, so its USB support could not have worked on any MG4,
+whatever the stick or the permissions. This fork tries three locations per volume and keeps the
+first that survives an actual write:
+
+1. `/mnt/media_rw/<uuid>/dashcam` — the raw vold mount. Reachable because the app runs as
+   uid 1000, and the one that puts clips at the root of the stick, where someone plugging it
+   into a computer will look for them.
+2. `<volume>/dashcam` — what upstream tries. Kept in case some firmware allows it.
+3. `.../Android/data/com.tommasov.mg4dashcam/files/dashcam` — the app's own sandbox. Always
+   writable, but **deleted when the app is uninstalled**.
+
+**Show storage details**, on the main screen, prints which one was chosen and, for a volume it
+rejected, why it was rejected. The head unit has no adb, so that button is the only way to see
+any of this from inside the car.
+
+Use **Stop and eject USB** before pulling the stick: it stops the loop and waits for the
+pending writes instead of truncating the clip in flight.
 
 ## Relationship to upstream
 
@@ -103,6 +133,11 @@ Changes made in this fork:
 - Re-enabled the storage target preference. Upstream's `DashcamStorageManager` ignores it and
   hardcodes internal storage, which is worth knowing if you are reading upstream's README:
   it documents a choice the code does not honour.
+- Writes to a volume's raw mount, or to the app sandbox, when the root of the FUSE view
+  refuses — see [Recording to a USB stick](#recording-to-a-usb-stick). Upstream probes only
+  `/storage/<uuid>`, which no app may write to.
+- Logs what the storage probe saw at each step, and surfaces it on screen, because a head unit
+  with no adb cannot be asked afterwards.
 - Ships the native library as a prebuilt instead of building it, since the sources are
   unchanged.
 - New application id and app name; the Java namespace stays `com.drivehub.kamera` because the
