@@ -19,6 +19,8 @@
     <string name="label_signature">Footer signature</string>
     <string name="label_show_speed">Show speed in the footer</string>
     <string name="label_oem_coexist">Yield the cameras to the factory 360/reverse view</string>
+    <string name="label_oem_max_speed">Yield below this speed (km/h)</string>
+    <string name="label_oem_max_speed_summary">Above it the dashcam keeps the cameras and the factory view will not open. The factory app itself stops offering the 360 view at about 15 km/h.</string>
     <string name="label_oem_coexist_summary">With this off, the stock reversing camera cannot open while the dashcam is recording.</string>
     <string name="camera_front">Front</string>
     <string name="camera_rear">Rear</string>

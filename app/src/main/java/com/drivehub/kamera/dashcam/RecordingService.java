@@ -482,6 +482,16 @@ public class RecordingService extends Service {
             String baseName = makeTimestampBase(segmentStartWallMs, "yyMMddHHmmss");
             boolean startedAnyCamera = recordClip(baseDir, segmentMs, baseName, keepSegments);
             if (!startedAnyCamera) {
+                // A clip cut short because the factory camera asked for the devices often fails
+                // to finalise: the muxer never writes its index and the file is unreadable. That
+                // costs one segment, and nothing more. Treating it as fatal ended the session,
+                // so nothing was left alive to resume when the 360 view closed — the recording
+                // simply never came back.
+                if (oemPauseRequested || segmentStopRequested) {
+                    DevRuntimeLog.add("RecordingService",
+                            "segment lost to the camera hand-off; waiting to resume");
+                    continue;
+                }
                 if (isRecoverableUsbFailure()) {
                     // AUTO mode: the segment failed because USB died. The next loop pass
                     // re-resolves to internal storage and shows the fallback banner.
@@ -577,6 +587,7 @@ public class RecordingService extends Service {
                 cameraMask);
 
         if (!started) {
+            discardUnreadable(outputFile);
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_GRID_START_FAILED);
             return false;
         }
@@ -597,11 +608,31 @@ public class RecordingService extends Service {
         }
 
         if (!CameraProbe.stopCombinedMp4Record()) {
+            // The muxer never closed, so whatever is on disk has no index and no player will
+            // open it. Leaving it would also cost a retention slot, pushing out a clip that can
+            // actually be watched.
+            discardUnreadable(outputFile);
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_GRID_STOP_TIMEOUT);
             return false;
         }
 
         return true;
+    }
+
+    /** Removes a clip the encoder never finished, and says so. */
+    private void discardUnreadable(File outputFile) {
+        try {
+            if (outputFile != null && outputFile.exists()) {
+                long size = outputFile.length();
+                if (outputFile.delete()) {
+                    DevRuntimeLog.add("RecordingService",
+                            "discarded unreadable clip " + outputFile.getName()
+                                    + " (" + size + " bytes)");
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "could not discard " + outputFile, t);
+        }
     }
 
     private boolean waitForOemPauseToClear(SharedPreferences prefs) {

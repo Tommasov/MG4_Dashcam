@@ -279,6 +279,20 @@
                 <TextView
                     style="@style/Hint"
                     android:text="@string/label_oem_coexist_summary" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_oem_max_speed" />
+
+                <EditText
+                    android:id="@+id/etOemMaxSpeed"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:text="@string/label_oem_max_speed_summary" />
             </LinearLayout>
         </LinearLayout>
 

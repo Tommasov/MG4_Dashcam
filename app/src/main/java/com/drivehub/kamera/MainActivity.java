@@ -58,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
     private EditText etMaxEventDirs;
     private EditText etFps;
     private EditText etSignature;
+    private EditText etOemMaxSpeed;
     private SwitchCompat swShowSpeed;
     private SwitchCompat swOemCoexist;
     private CheckBox cbFront;
@@ -105,6 +106,7 @@ public class MainActivity extends AppCompatActivity {
         etMaxEventDirs = findViewById(R.id.etMaxEventDirs);
         etFps = findViewById(R.id.etFps);
         etSignature = findViewById(R.id.etSignature);
+        etOemMaxSpeed = findViewById(R.id.etOemMaxSpeed);
         swShowSpeed = findViewById(R.id.swShowSpeed);
         swOemCoexist = findViewById(R.id.swOemCoexist);
         cbFront = findViewById(R.id.cbFront);
@@ -196,6 +198,7 @@ public class MainActivity extends AppCompatActivity {
         etMaxEventDirs.setText(String.valueOf(DashcamSettings.getMaxRetainedEventDirs(prefs)));
         etFps.setText(String.valueOf(DashcamSettings.getRecordingFps(prefs)));
         etSignature.setText(DashcamSettings.getRecordingSignature(prefs));
+        etOemMaxSpeed.setText(String.valueOf(UiPrefs.getDevOemAvmMaxSpeedKmh(prefs)));
 
         syncing = false;
 
@@ -252,6 +255,11 @@ public class MainActivity extends AppCompatActivity {
         onBlur(etFps, () -> {
             DashcamSettings.setRecordingFps(prefs(), readInt(etFps, DashcamSettings.DEFAULT_RECORDING_FPS));
             etFps.setText(String.valueOf(DashcamSettings.getRecordingFps(prefs())));
+        });
+        onBlur(etOemMaxSpeed, () -> {
+            UiPrefs.setDevOemAvmMaxSpeedKmh(prefs(), readInt(etOemMaxSpeed,
+                    UiPrefs.DEFAULT_DEV_OEM_AVM_MAX_SPEED_KMH));
+            etOemMaxSpeed.setText(String.valueOf(UiPrefs.getDevOemAvmMaxSpeedKmh(prefs())));
         });
         onBlur(etSignature, () -> {
             DashcamSettings.setRecordingSignature(prefs(), etSignature.getText().toString());
