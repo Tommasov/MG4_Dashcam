@@ -139,7 +139,24 @@ public class RecordingService extends Service {
     private static final long SUPERVISOR_PERIOD_MS = 20_000L;
     private static final long OEM_POLL_MS = 1_000L;
     private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
-    private int awayPolls = 0;
+    /** When the factory app first appeared, so a failed attempt can be told from a real one. */
+    private long oemForegroundSinceMs = 0L;
+    /** When it left the screen, or 0 while it is still there. */
+    private long oemGoneSinceMs = 0L;
+
+    /**
+     * A visit shorter than this is the factory app failing to open, not somebody looking at it.
+     * It comes up, finds the cameras busy, and closes itself in well under a second.
+     */
+    private static final long OEM_FAILED_VISIT_MS = 3_000L;
+    /** After a real 360 session: long enough that a flicker between screens is not a departure. */
+    private static final long OEM_RESUME_DELAY_MS = 2_000L;
+    /**
+     * After a failed one: long enough for the driver to press the button again and find the
+     * cameras free. Recording gives up those seconds, which is the right trade - the driver is
+     * asking to see behind the car right now, and we were the reason they could not.
+     */
+    private static final long OEM_RETRY_GRACE_MS = 8_000L;
     private boolean lastForeground = false;
     /**
      * The hand-off runs here rather than on the main thread. {@code getRunningTasks} is a binder
@@ -380,7 +397,8 @@ public class RecordingService extends Service {
             oemPauseRequested = false;
             segmentStopRequested = false;
             pausedSinceMs = 0L;
-            awayPolls = 0;
+            oemForegroundSinceMs = 0L;
+            oemGoneSinceMs = 0L;
             synchronized (stateLock) {
                 stateLock.notifyAll();
             }
@@ -803,21 +821,41 @@ public class RecordingService extends Service {
                             "oem foreground=" + front + " (paused=" + oemPauseRequested + ")");
                     lastForeground = front;
                 }
-                if (front && !oemPauseRequested) {
-                    DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
-                    pausedSinceMs = System.currentTimeMillis();
-                    beginOemPauseNow();
-                    publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
-                    awayPolls = 0;
-                } else if (!front && oemPauseRequested) {
-                    // Two polls, so a moment of the launcher between screens is not a departure.
-                    if (++awayPolls >= 2) {
-                        DevRuntimeLog.add("RecordingService", "oem gone from foreground; resuming");
-                        awayPolls = 0;
+                long now = System.currentTimeMillis();
+                if (front) {
+                    oemGoneSinceMs = 0L;
+                    if (oemForegroundSinceMs == 0L) {
+                        oemForegroundSinceMs = now;
+                    }
+                    if (!oemPauseRequested) {
+                        DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
+                        pausedSinceMs = now;
+                        beginOemPauseNow();
+                        publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
+                    }
+                } else if (oemPauseRequested) {
+                    if (oemGoneSinceMs == 0L) {
+                        oemGoneSinceMs = now;
+                    }
+                    // How long it stayed decides how long we stay out of the way.
+                    //
+                    // We only find out the factory app wants the cameras once it is already on
+                    // screen, and by then it has tried to open them and found us holding them.
+                    // So its first attempt fails, it closes itself within a second, and if we
+                    // take the cameras straight back the second press fails for the same reason.
+                    // That is the "press it twice and nothing happens" on the car.
+                    //
+                    // A short visit is therefore read as a failed attempt, and the cameras stay
+                    // free long enough for the next press to find them. A real session ended by
+                    // the driver gets the cameras back promptly instead.
+                    long onScreenMs = Math.max(0L, oemGoneSinceMs - oemForegroundSinceMs);
+                    boolean failedAttempt = onScreenMs < OEM_FAILED_VISIT_MS;
+                    long holdMs = failedAttempt ? OEM_RETRY_GRACE_MS : OEM_RESUME_DELAY_MS;
+                    if (now - oemGoneSinceMs >= holdMs) {
+                        DevRuntimeLog.add("RecordingService", "oem gone after " + onScreenMs
+                                + "ms" + (failedAttempt ? " (failed attempt)" : "") + "; resuming");
                         resumeAfterOemRequest(this);
                     }
-                } else {
-                    awayPolls = 0;
                 }
                 // Last resort. Whatever went wrong - a signal we never saw, a foreground reading
                 // that stays stale, a broadcast that never came - a dashcam that stays paused is
@@ -828,6 +866,8 @@ public class RecordingService extends Service {
                     DevRuntimeLog.add("RecordingService",
                             "paused for over " + (MAX_OEM_PAUSE_MS / 1000) + "s; forcing resume");
                     pausedSinceMs = 0L;
+                    oemForegroundSinceMs = 0L;
+                    oemGoneSinceMs = 0L;
                     resumeAfterOemRequest(this);
                 }
             }
