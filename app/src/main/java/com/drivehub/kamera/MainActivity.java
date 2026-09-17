@@ -7,6 +7,7 @@ import com.drivehub.kamera.dev.CrashTrail;
 import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.dev.ProbeReport;
 import com.drivehub.kamera.dev.OemCaptures;
+import com.drivehub.kamera.settings.Dialogs;
 import com.drivehub.kamera.settings.UiPrefs;
 
 import android.Manifest;
@@ -373,7 +374,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Deleting another app's files deserves a question first, especially on a touch screen. */
     private void confirmDeleteOemCaptures() {
-        new AlertDialog.Builder(this)
+        Dialogs.builder(this)
                 .setTitle(R.string.oem_delete_title)
                 .setMessage(R.string.oem_delete_message)
                 .setNegativeButton(android.R.string.cancel, null)
@@ -404,13 +405,15 @@ public class MainActivity extends AppCompatActivity {
      * is the only way someone can consent to sending it.
      */
     private void confirmSendProbe() {
-        final EditText note = new EditText(this);
+        // The note field is built with the scaled context too, or it would stay small while the
+        // title and buttons around it grew.
+        final Context dialogContext = Dialogs.scaled(this);
+        final EditText note = new EditText(dialogContext);
         note.setHint(R.string.probe_dialog_note_hint);
-        note.setTextSize(20f);
         int pad = getResources().getDimensionPixelSize(R.dimen.screen_padding);
         note.setPadding(pad, pad / 2, pad, pad / 2);
 
-        new AlertDialog.Builder(this)
+        Dialogs.builder(this)
                 .setTitle(R.string.probe_dialog_title)
                 .setMessage(R.string.probe_dialog_message)
                 .setView(note)

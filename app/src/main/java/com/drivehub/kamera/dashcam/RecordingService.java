@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -78,6 +79,7 @@ public class RecordingService extends Service {
     private static final String ERROR_USB_STORAGE = "usb storage unavailable";
     private static final String ERROR_LOOP_DIED = "recording loop died";
     private static final String ERROR_STALLED = "recording stalled";
+    private static final String ERROR_CRASH_LOOP = "crash loop";
 
     private static final String KEY_STATUS = "recordingStatus";
     private static final String KEY_ACTIVE_CAMERAS = "recordingActiveCameras";
@@ -91,6 +93,15 @@ public class RecordingService extends Service {
     public static final String KEY_SERVICE_STARTS = "serviceStartCount";
     public static final String KEY_STICKY_RESTARTS = "stickyRestartCount";
     public static final String KEY_LAST_SERVICE_START = "lastServiceStartMs";
+    // The crash-loop brake counts in preferences, not in a field: the field dies with the
+    // process every time round the loop, which is the whole problem.
+    private static final String KEY_CRASH_WINDOW_START = "crashWindowStartMs";
+    private static final String KEY_CRASH_WINDOW_COUNT = "crashWindowCount";
+
+    /** How long a run of sticky restarts has to happen within to count as a loop. */
+    private static final long CRASH_LOOP_WINDOW_MS = 3 * 60_000L;
+    /** Restarts within that window before giving up. Coming back once is right; five times is not. */
+    private static final int CRASH_LOOP_LIMIT = 5;
 
     private static final String CHANNEL_ID = "mg4_recording";
     private static final int NOTIF_ID = 42;
@@ -271,6 +282,17 @@ public class RecordingService extends Service {
                 stopSelf();
                 return START_NOT_STICKY;
             }
+            if (crashLoopDetected()) {
+                DevRuntimeLog.add("RecordingService", "crash loop: stopped resuming, switch off");
+                // Turning the switch off is the only thing that actually ends the loop. Leaving
+                // it on means the next glance at the app starts the whole thing again, and the
+                // driver is left with a head unit that will not sit still.
+                prefs().edit().putBoolean(DashcamSettings.KEY_ENABLED, false).apply();
+                publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_CRASH_LOOP);
+                stopForeground(true);
+                stopSelf();
+                return START_NOT_STICKY;
+            }
         }
         String action = intent == null ? null : intent.getAction();
 
@@ -405,6 +427,14 @@ public class RecordingService extends Service {
         }
 
         stopRequested = false;
+        if (ACTION_START.equals(action)) {
+            // Asked for by hand, from the switch or from the boot receiver. Whatever went wrong
+            // before, this is a fresh attempt and deserves its full allowance of restarts.
+            prefs().edit()
+                    .remove(KEY_CRASH_WINDOW_START)
+                    .remove(KEY_CRASH_WINDOW_COUNT)
+                    .apply();
+        }
         DevRuntimeLog.add("RecordingService", action == null ? "ACTION_START(null)" : action);
         startForeground(NOTIF_ID, buildNotification(getString(R.string.notification_recording_starting)));
         publishStatus(STATUS_STARTING, 0, TOTAL_CAMERAS, "");
@@ -733,7 +763,13 @@ public class RecordingService extends Service {
                 // standing invitation to an ANR, and an ANR kills the process - which is one of
                 // the ways a recording can vanish without leaving anything behind.
                 boolean front = lastForegroundReading;
-                probeExecutor.execute(() -> lastForegroundReading = isOemAvmInForeground());
+                try {
+                    probeExecutor.execute(() -> lastForegroundReading = isOemAvmInForeground());
+                } catch (RejectedExecutionException e) {
+                    // The executor is gone, so the reading goes stale; that is a worse hand-off
+                    // to the factory camera, not a reason to take the process down with us.
+                    DevRuntimeLog.add("RecordingService", "oem probe rejected: " + e);
+                }
                 if (front != lastForeground) {
                     // Only on change: at one poll a second, logging every result would bury
                     // everything else in the runtime log.
@@ -828,8 +864,17 @@ public class RecordingService extends Service {
         lastSegmentCompletedMs = System.currentTimeMillis();
         mainHandler.removeCallbacks(watchdog);
         mainHandler.removeCallbacks(oemForegroundWatch);
-        mainHandler.removeCallbacks(supervisor);
-        probeExecutor.shutdownNow();
+        // Nothing else is cancelled here. Two things used to be, and both were wrong:
+        //
+        // The supervisor is meant to outlive the loop - that is its entire job - and removing it
+        // at the start of every session left nothing watching once the loop was up.
+        //
+        // probeExecutor.shutdownNow() was worse. The executor is a field of the service, not of
+        // the session, and shutting it down is permanent. A second later oemForegroundWatch
+        // called execute() on it, RejectedExecutionException came back on the main thread, and
+        // the process died; START_STICKY brought it back, the loop started again, and it died
+        // again two seconds later. That was the crash loop on the car. The executor is shut down
+        // in onDestroy, where a service-scoped resource belongs.
         mainHandler.postDelayed(watchdog, WATCHDOG_PERIOD_MS);
     }
 
@@ -1552,6 +1597,11 @@ public class RecordingService extends Service {
                     R.string.dashcam_recording_error_overlay_subtitle_stalled,
                     R.string.notification_dashcam_recording_error_stalled_text);
         }
+        if (ERROR_CRASH_LOOP.equals(lastError)) {
+            return new OverlayMessageSpec(
+                    R.string.dashcam_recording_error_overlay_subtitle_crash_loop,
+                    R.string.notification_dashcam_recording_error_crash_loop_text);
+        }
         if (ERROR_USB_STORAGE.equals(lastError)) {
             return new OverlayMessageSpec(
                     R.string.dashcam_recording_error_overlay_subtitle_usb_unavailable,
@@ -1560,6 +1610,34 @@ public class RecordingService extends Service {
         return new OverlayMessageSpec(
                 R.string.dashcam_recording_error_overlay_subtitle_generic,
                 R.string.notification_dashcam_recording_error_text);
+    }
+
+    /**
+     * Whether the process is dying faster than it can record.
+     *
+     * <p>A sticky service whose process dies on start is brought back by Android at once, and
+     * dies again. On the car that came to twenty-eight crashes inside a minute, with the app
+     * flickering in and out and nothing recorded in between. Coming back once is the right
+     * answer; coming back five times in three minutes is a loop, and the only useful thing left
+     * to do is stop and say so.
+     */
+    private boolean crashLoopDetected() {
+        SharedPreferences sp = prefs();
+        long now = System.currentTimeMillis();
+        long windowStart = sp.getLong(KEY_CRASH_WINDOW_START, 0L);
+        int inWindow = sp.getInt(KEY_CRASH_WINDOW_COUNT, 0);
+        // The head unit sets its clock from the network once it wakes, so time can jump either
+        // way. A window that no longer makes sense is started again rather than trusted.
+        if (windowStart == 0L || now < windowStart || now - windowStart > CRASH_LOOP_WINDOW_MS) {
+            windowStart = now;
+            inWindow = 0;
+        }
+        inWindow++;
+        sp.edit()
+                .putLong(KEY_CRASH_WINDOW_START, windowStart)
+                .putInt(KEY_CRASH_WINDOW_COUNT, inWindow)
+                .apply();
+        return inWindow >= CRASH_LOOP_LIMIT;
     }
 
     private SharedPreferences prefs() {
@@ -1684,7 +1762,10 @@ public class RecordingService extends Service {
         sWorkerActive = false;
         stopRequested = true;
         mainHandler.removeCallbacks(watchdog);
+        mainHandler.removeCallbacks(oemForegroundWatch);
+        mainHandler.removeCallbacks(supervisor);
         cancelPendingErrorOverlay();
+        probeExecutor.shutdownNow();
         eventCopyExecutor.shutdown();
         if (worker != null) {
             worker.interrupt();

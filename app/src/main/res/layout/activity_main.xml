@@ -308,6 +308,28 @@
             android:maxWidth="@dimen/text_measure_max"
             android:text="@string/section_oem_summary" />
 
+        <!-- Two rows rather than one: five labels do not fit across the screen in every
+             language, and a horizontal LinearLayout does not wrap - it hands the leftovers a
+             width of nothing and lets them fall off the edge. The row above belongs to the
+             factory app's folder, the one below to this app. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnCopyOemCaptures"
+                style="@style/TonalButtonCell"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:text="@string/btn_copy_oem_captures" />
+
+            <Button
+                android:id="@+id/btnDeleteOemCaptures"
+                style="@style/TonalButtonCell"
+                android:textColor="@color/warning"
+                android:text="@string/btn_delete_oem_captures" />
+        </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -315,32 +337,19 @@
 
             <Button
                 android:id="@+id/btnStorageDetails"
-                style="@style/TonalButton"
+                style="@style/TonalButtonCell"
                 android:layout_marginEnd="@dimen/button_gap"
                 android:text="@string/btn_storage_details" />
 
             <Button
-                android:id="@+id/btnCopyOemCaptures"
-                style="@style/TonalButton"
-                android:layout_marginEnd="@dimen/button_gap"
-                android:text="@string/btn_copy_oem_captures" />
-
-            <Button
-                android:id="@+id/btnDeleteOemCaptures"
-                style="@style/TonalButton"
-                android:layout_marginEnd="@dimen/button_gap"
-                android:textColor="@color/warning"
-                android:text="@string/btn_delete_oem_captures" />
-
-            <Button
                 android:id="@+id/btnSendProbe"
-                style="@style/TonalButton"
+                style="@style/TonalButtonCell"
                 android:layout_marginEnd="@dimen/button_gap"
                 android:text="@string/btn_send_probe" />
 
             <Button
                 android:id="@+id/btnTestClip"
-                style="@style/TonalButton"
+                style="@style/TonalButtonCell"
                 android:text="@string/btn_test_clip" />
         </LinearLayout>
 

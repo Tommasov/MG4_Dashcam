@@ -73,6 +73,21 @@
         <item name="android:textSize">@dimen/button_size</item>
     </style>
 
+    <!-- A tonal button that shares a row with others. The row divides its width between them
+         instead of letting each one take what its label needs, so no label can push a
+         neighbour off the edge of the screen - which is what the Italian labels did to a row
+         laid out for the English ones, taking the last button with them and leaving a column
+         of wrapped text scrolling below.
+
+         match_parent height keeps a button whose label wraps onto two lines the same height as
+         the ones beside it. -->
+    <style name="TonalButtonCell" parent="TonalButton">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center</item>
+    </style>
+
     <style name="Hairline" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">@dimen/hairline_height</item>

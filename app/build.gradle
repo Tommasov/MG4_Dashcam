@@ -27,8 +27,8 @@ android {
         applicationId "com.tommasov.mg4dashcam"
         minSdk 28
         targetSdk 36
-        versionCode 20
-        versionName "0.1.0-beta.9"
+        versionCode 22
+        versionName "0.1.0-beta.11"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 

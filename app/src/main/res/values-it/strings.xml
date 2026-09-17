@@ -90,8 +90,10 @@
     <string name="dashcam_recording_error_overlay_subtitle_usb_unavailable">USB non disponibile</string>
     <string name="dashcam_recording_error_overlay_subtitle_usb_fallback">Passata alla memoria interna</string>
     <string name="dashcam_recording_error_overlay_subtitle_stalled">Registrazione bloccata</string>
+    <string name="dashcam_recording_error_overlay_subtitle_crash_loop">La registrazione si blocca subito</string>
     <string name="notification_dashcam_recording_error_text">La dashcam ha smesso di registrare.</string>
     <string name="notification_dashcam_recording_error_stalled_text">Non viene scritto uno spezzone da un po\'. Spegni e riaccendi l\'interruttore.</string>
+    <string name="notification_dashcam_recording_error_crash_loop_text">La registrazione è andata in errore più volte di seguito, così ho spento l\'interruttore. Manda un referto diagnostico prima di riaccenderlo.</string>
     <string name="notification_dashcam_recording_error_storage_text">Non riesco a scrivere nella cartella di registrazione.</string>
     <string name="notification_dashcam_recording_error_start_failed_text">Non è stato possibile aprire le telecamere.</string>
     <string name="notification_dashcam_recording_error_stop_failed_text">L\'ultimo spezzone non è stato chiuso correttamente.</string>
