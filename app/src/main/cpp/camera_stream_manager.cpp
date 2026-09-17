@@ -1505,6 +1505,13 @@ namespace camera_stream_manager
                 }
                 stopRequested_.store(false);
                 running_.store(true);
+                if (worker_.joinable() && worker_.get_id() == std::this_thread::get_id())
+                {
+                    // Cannot happen today - this runs on whichever thread asked to record, never
+                    // on the capture thread - but skipping the join below and falling through to
+                    // the assignment would be the very bug this guard exists to prevent.
+                    worker_.detach();
+                }
                 if (worker_.joinable())
                 {
                     // The previous loop can end on its own, and usually does: once the last
@@ -1731,7 +1738,27 @@ namespace camera_stream_manager
 
                 if (worker.joinable())
                 {
-                    worker.join();
+                    if (worker.get_id() == std::this_thread::get_id())
+                    {
+                        // We are the capture thread, tearing down the session we belong to.
+                        //
+                        // That happens because the thread holds a shared_ptr to its own session:
+                        // eraseSessionIfIdle() can drop the map's reference in the moment between
+                        // threadLoop() clearing running_ and the lambda being destroyed, and then
+                        // the last reference is ours. The destructor runs here, on this thread.
+                        //
+                        // Joining yourself is EDEADLK, join() throws, and the local std::thread is
+                        // then destroyed still joinable - which is std::terminate(), called with
+                        // no exception caught yet. That is the bare "terminating" abort on the car.
+                        //
+                        // Detaching is correct rather than merely safe: this thread is one
+                        // statement from returning, and there is nothing left to wait for.
+                        worker.detach();
+                    }
+                    else
+                    {
+                        worker.join();
+                    }
                 }
 
                 {

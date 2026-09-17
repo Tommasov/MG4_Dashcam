@@ -137,7 +137,20 @@ public class RecordingService extends Service {
     private volatile long lastSegmentCompletedMs = 0L;
     private static final long WATCHDOG_PERIOD_MS = 20_000L;
     private static final long SUPERVISOR_PERIOD_MS = 20_000L;
-    private static final long OEM_POLL_MS = 1_000L;
+    /**
+     * How often to look at what is on screen.
+     *
+     * <p>A second was too coarse, and the car proved it: when the factory 360 view fails to open
+     * because we are holding the cameras, it is on screen for three or four tenths of a second
+     * and then gone. The activity's own onPause/onResume caught three such attempts in one
+     * session; the poll caught none of them, so the hand-off never started and the driver's
+     * button did nothing. A visit that short is seen roughly three times in ten at one second,
+     * and every time at two hundred milliseconds.
+     *
+     * <p>Five binder calls a second, on a thread of their own, for a car that is plugged into an
+     * engine. The hand-off is worth more than the cycles.
+     */
+    private static final long OEM_POLL_MS = 200L;
     private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
     /** When the factory app first appeared, so a failed attempt can be told from a real one. */
     private long oemForegroundSinceMs = 0L;
@@ -146,9 +159,11 @@ public class RecordingService extends Service {
 
     /**
      * A visit shorter than this is the factory app failing to open, not somebody looking at it.
-     * It comes up, finds the cameras busy, and closes itself in well under a second.
+     * It comes up, finds the cameras busy, and closes itself in three or four tenths of a second;
+     * the shortest visit worth calling a look is a couple of seconds. Measured at the poll
+     * period, so it only means anything now that the poll is fast enough to measure it.
      */
-    private static final long OEM_FAILED_VISIT_MS = 3_000L;
+    private static final long OEM_FAILED_VISIT_MS = 1_500L;
     /** After a real 360 session: long enough that a flicker between screens is not a departure. */
     private static final long OEM_RESUME_DELAY_MS = 2_000L;
     /**
