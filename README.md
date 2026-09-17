@@ -7,10 +7,11 @@ This is a stripped fork of [jamakr4/MG4-360-Camera-App](https://github.com/jamak
 whose author did the hard part: finding out how to get frames out of this vehicle's cameras at
 all. See [Relationship to upstream](#relationship-to-upstream).
 
-> **Status: early.** Confirmed on the vehicle: it records the loop to a USB stick at a measured
-> 25 fps with no dropped frames, and yields the cameras to the factory 360 view. Long-term use,
-> the internal-storage target and the event save have had no real mileage yet. Treat every
-> release as a test build.
+> **Status: early, but on the road.** Confirmed on the vehicle: it records the loop to a USB
+> stick at a measured 25 fps with no dropped frames; it hands the cameras to the factory 360
+> view for reverse, the steering-wheel button and the indicator, and picks recording back up on
+> its own afterwards. Not yet proven over long drives, and the internal-storage target and the
+> event save have had little real mileage. Treat every release as a test build.
 
 <p align="center">
   <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/screenshot-day.png" alt="The dashcam screen on the head unit, light theme" width="90%">
@@ -44,8 +45,15 @@ all. See [Relationship to upstream](#relationship-to-upstream).
   camera keeps working. Turning this off means the OEM app gets "Device or resource busy" for
   as long as the dashcam is recording.
 - Starts itself on boot when the switch is on.
+- Says what it is doing from across the cabin: a green **ON** badge while recording, amber
+  while it has handed the cameras over, red when something is wrong. Green is checked rather
+  than claimed - a watchdog turns it red if no clip has been written for three segment lengths,
+  because a badge that lies is worse than no badge.
 - Reads, copies and clears what the factory 360 app leaves in its own private folder - see
   [The factory app's hidden recorder](#the-factory-apps-hidden-recorder).
+- Sends a diagnostics report, on request and after a confirmation - see
+  [Diagnostics](#diagnostics).
+- Speaks English and Italian, and follows the head unit between its light and dark themes.
 
 What it deliberately does **not** do: tile view, turn-signal overlay, digital rearview mirror,
 floating banners, in-app updates. Those are upstream's, and upstream is where they belong.
@@ -85,6 +93,38 @@ upstream's own build of the C++ in `app/src/main/cpp/`, which this fork does not
 how to rebuild it from source instead.
 
 Everything else is a normal Gradle build against the Android SDK.
+
+One optional file: `apikeys.properties` at the root, git-ignored, holding `probe.key` for the
+diagnostics endpoint. Without it the build succeeds and the send button is not shown, which is
+the intended behaviour for anyone building this who is not the author.
+
+## Sharing the cameras with the car
+
+There are four camera devices and only one of anything can hold them, so when the factory
+around-view app wants them the dashcam has to let go - for reverse, for the steering-wheel
+button, for the indicator view at low speed. It is a race, and losing it looks like the screen
+dimming with no picture behind it.
+
+Three things decide it:
+
+- The broadcast from the factory app is answered **in the receiver**, which raises the flags and
+  interrupts the recording thread directly. Going through the service first cost service
+  creation and scheduling before anything was released, which was time spent on the wrong side
+  of the race.
+- A second detector watches which app is actually in front, once a second. It is slower than a
+  broadcast but catches every route into the factory camera, including any this project has not
+  mapped, and it notices when the factory app goes away without saying so.
+- A pause never lasts more than a minute. Whatever was missed - a signal, a broadcast, a stale
+  reading - a dashcam that stays paused is a dashcam that is not recording, and contending
+  briefly with the factory camera is the lesser failure.
+
+Above **20 km/h** the cameras are not handed over, which is adjustable in the app. The factory
+view stops being offered around 15 km/h anyway, so the margin errs upwards on purpose: too high
+costs an occasional lost segment, too low leaves the reversing camera dark.
+
+The clip in progress is closed when the cameras go, so a hand-off costs seconds, not a file. If
+the encoder cannot finish it in time the fragment is deleted rather than left behind: an
+unreadable clip would otherwise take a retention slot from one that can be watched.
 
 ## Storage, and what it costs
 
@@ -199,6 +239,29 @@ are captured 1/50 s apart, weaving them combs every moving object, and keeping o
 choice. Recording with `RecordActivity` **while driving** and looking for combing in the
 1440x960 output settles it.
 
+## Diagnostics
+
+This head unit gives a developer almost nothing to work with. No adb once the firmware is new
+enough, no real browser, and nothing on board that accepts a share: the firmware ships the
+Bluetooth stack with `profile_supported_opp` false, which disables the one activity handling
+`ACTION_SEND`. There is no text field to paste into either. A log that cannot leave the car can
+only be photographed off the screen.
+
+So there are two ways out, and the app prefers the one that costs nothing to read:
+
+- **Show storage details** prints, on the car, what the storage probe saw, what the factory 360
+  app has left in its folder, and the runtime log - every hand-off, every pause, every failure,
+  with timings.
+- **Send a diagnostics report** posts the same text to the author's endpoint. It asks first,
+  states exactly what will be sent, and asks for one line about what you were doing, which is
+  the half that makes the other half readable. Nothing leaves the car until you confirm, and
+  the report carries no video, no images and no location.
+
+The report endpoint can only accept: it cannot read a report back, list what is there or delete
+anything, with any key. That is what makes it safe to ship its write key inside an APK anyone
+can unzip. The key lives in `apikeys.properties`, which is git-ignored - a clone without one
+still builds, and simply does not offer the button.
+
 ## Graphic resources
 
 The switch track and thumb are taken from the vehicle's own system software, so that a toggle
@@ -241,6 +304,11 @@ Changes made in this fork:
   with no adb cannot be asked afterwards.
 - Reaches into the factory 360 app's private directory, which is possible because both declare
   the same system shared user, to recover and clear what its hidden recorder leaves there.
+- Hardened the recording loop: an exception can no longer kill the worker quietly, leaving the
+  service alive and the UI claiming to record. A stalled loop turns the badge red instead.
+- Made the camera hand-off fast enough to win its race, added a second detector that watches the
+  foreground app, and capped a pause at a minute - see
+  [Sharing the cameras with the car](#sharing-the-cameras-with-the-car).
 - Ships the native library as a prebuilt instead of building it, since the sources are
   unchanged.
 - New application id and app name; the Java namespace stays `com.drivehub.kamera` because the
