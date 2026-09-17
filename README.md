@@ -7,9 +7,10 @@ This is a stripped fork of [jamakr4/MG4-360-Camera-App](https://github.com/jamak
 whose author did the hard part: finding out how to get frames out of this vehicle's cameras at
 all. See [Relationship to upstream](#relationship-to-upstream).
 
-> **Status: early.** It installs on the vehicle, runs as the system user and reads the storage
-> layout correctly; a full recording session has not been confirmed yet. Treat every release as
-> a test build.
+> **Status: early.** Confirmed on the vehicle: it records the loop to a USB stick at a measured
+> 25 fps with no dropped frames, and yields the cameras to the factory 360 view. Long-term use,
+> the internal-storage target and the event save have had no real mileage yet. Treat every
+> release as a test build.
 
 ## What it does
 
@@ -31,6 +32,8 @@ all. See [Relationship to upstream](#relationship-to-upstream).
   camera keeps working. Turning this off means the OEM app gets "Device or resource busy" for
   as long as the dashcam is recording.
 - Starts itself on boot when the switch is on.
+- Reads, copies and clears what the factory 360 app leaves in its own private folder - see
+  [The factory app's hidden recorder](#the-factory-apps-hidden-recorder).
 
 What it deliberately does **not** do: tile view, turn-signal overlay, digital rearview mirror,
 floating banners, in-app updates. Those are upstream's, and upstream is where they belong.
@@ -116,6 +119,74 @@ any of this from inside the car.
 Use **Stop and eject USB** before pulling the stick: it stops the loop and waits for the
 pending writes instead of truncating the clip in flight.
 
+## The factory app's hidden recorder
+
+The stock around-view app ships a screen that is not on any menu:
+`com.saicmotor.hmi.aroundview.RecordActivity`. It is reachable from outside because its
+intent-filter carries the invented action `android.intent.action.MAIN3` with
+`category.LAUNCHER` - a trick that keeps it out of the launcher while leaving it exported,
+since the app targets API 29 and an intent-filter makes `exported` default to true there.
+
+```
+am start -n com.saicmotor.hmi.aroundview/.RecordActivity
+```
+
+or point any activity-launcher app at that component. It shows the four cameras live with two
+buttons in Chinese: start/stop video, and capture a single frame.
+
+It is safe to open. Its only calls are `V4l2Utils.init`, `startRecordVideo`, `stopRecordVideo`,
+`saveCameraImageX4`, `setAngle`, `setSpeed` and `unInit`. Nothing touches calibration, which on
+this vehicle is not stored on the head unit at all - the unit has no persist partition, the app
+holds no calibration file, and a factory reset does not lose it.
+
+**Turn loop recording off first.** `RecordActivity` does not emit the AVM broadcasts that
+`AVMActivity` sends, so the automatic hand-off that yields the cameras to the factory app does
+not cover this screen. With the dashcam running, whichever opens the devices second gets
+nothing. And the video button has no time limit: it records until pressed again.
+
+### What it writes
+
+Into `/data/user/0/com.saicmotor.hmi.aroundview/files/`, and it never cleans up:
+
+| file | what it is |
+|---|---|
+| `720x480_nv12_<ms>_0..3.nv12` | four raw NV12 stills, one per camera, 518400 bytes each |
+| `720x480_<ms>.h264` | the four cameras as one **1440x960** raw H.264 stream at 25 fps - the name is the per-camera size, not the frame size |
+| `test_720x480_0.nv12` | a debug dump whose path is hardcoded inside `libv4l2utils.so`; one camera only, overwritten every time |
+
+Channel order is the 2x2 reading order: 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right.
+On this car channel 0 is the left camera. That numbering is the factory app's own and does not
+match this app's camera mask, where bit 0 is the front camera.
+
+That directory is private to the factory app, so a file manager cannot reach it - but that app
+declares `android:sharedUserId="android.uid.system"` exactly as this one does, so both run as
+uid 1000 and the files belong to us as much as to it. **Factory 360 app** on the main screen
+lists them, copies them into the dashcam records folder, and deletes them.
+
+To look at them on a computer:
+
+```shell
+ffmpeg -f rawvideo -pix_fmt nv12 -s 720x480 -i 720x480_nv12_1789590561951_0.nv12 cam0.png
+ffmpeg -r 25 -i 720x480_1789590524395.h264 -c copy oem_360.mp4
+```
+
+Both are headerless streams: nothing in the file states its geometry or frame rate, so it has
+to be given on the command line.
+
+### Why it is worth knowing about
+
+Those stills are the reference for what the cameras actually deliver: **720x480 per camera,
+progressive, no interlace combing**. This app records cells of 720x240, because the V4L2 buffer
+holds two 240-row halves stacked and the capture path keeps one of them.
+
+That costs vertical resolution, not field of view - a 720x240 cell stretched back to 720x480 is
+a complete, correctly proportioned fisheye, matching the factory still. Raising the crop to 480
+would not help, since it would yield the same picture twice; the two halves would have to be
+interleaved. Whether that is worth doing depends on something still untested: if the two halves
+are captured 1/50 s apart, weaving them combs every moving object, and keeping one is the right
+choice. Recording with `RecordActivity` **while driving** and looking for combing in the
+1440x960 output settles it.
+
 ## Relationship to upstream
 
 Upstream is GPL-3.0 and so is this, as required. The work that matters — the V4L2 device
@@ -138,6 +209,8 @@ Changes made in this fork:
   `/storage/<uuid>`, which no app may write to.
 - Logs what the storage probe saw at each step, and surfaces it on screen, because a head unit
   with no adb cannot be asked afterwards.
+- Reaches into the factory 360 app's private directory, which is possible because both declare
+  the same system shared user, to recover and clear what its hidden recorder leaves there.
 - Ships the native library as a prebuilt instead of building it, since the sources are
   unchanged.
 - New application id and app name; the Java namespace stays `com.drivehub.kamera` because the
