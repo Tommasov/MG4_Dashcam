@@ -3,6 +3,7 @@ package com.drivehub.kamera;
 import com.drivehub.kamera.dashcam.DashcamSettings;
 import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
+import com.drivehub.kamera.dev.CrashTrail;
 import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.dev.ProbeReport;
 import com.drivehub.kamera.dev.OemCaptures;
@@ -445,6 +446,11 @@ public class MainActivity extends AppCompatActivity {
         sb.append("android: ").append(Build.VERSION.RELEASE)
                 .append(" / API ").append(Build.VERSION.SDK_INT).append("\n");
         sb.append("uid: ").append(android.os.Process.myUid()).append("\n");
+        // These cross a process death; the runtime log does not.
+        sb.append("service starts: ").append(prefs().getInt(RecordingService.KEY_SERVICE_STARTS, 0))
+                .append(", sticky restarts: ")
+                .append(prefs().getInt(RecordingService.KEY_STICKY_RESTARTS, 0))
+                .append("\n");
         try {
             sb.append("\n").append(DashcamStorageManager.describeProbe(this)).append("\n");
         } catch (Throwable t) {
@@ -452,6 +458,8 @@ public class MainActivity extends AppCompatActivity {
         }
         sb.append("\n").append("== 360 app captures ==").append("\n")
                 .append(safeOemListing());
+        sb.append("\n").append("== what android recorded about our deaths ==").append("\n")
+                .append(CrashTrail.describe());
         sb.append("\n").append("== runtime log ==").append("\n")
                 .append(DevRuntimeLog.snapshot()).append("\n");
         return sb.toString();

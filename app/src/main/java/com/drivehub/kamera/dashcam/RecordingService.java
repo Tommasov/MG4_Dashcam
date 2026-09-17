@@ -86,6 +86,11 @@ public class RecordingService extends Service {
     private static final String KEY_EVENT_COMPLETED_SEGMENT_COUNT = "eventCompletedSegmentCount";
     private static final String KEY_EVENT_RECENT_SEGMENTS = "eventRecentSegments";
     private static final String KEY_EVENT_PENDING_REQUESTS = "eventPendingRequests";
+    // The runtime log lives in memory and dies with the process, which is exactly when it would
+    // have been worth reading. These survive in preferences instead.
+    public static final String KEY_SERVICE_STARTS = "serviceStartCount";
+    public static final String KEY_STICKY_RESTARTS = "stickyRestartCount";
+    public static final String KEY_LAST_SERVICE_START = "lastServiceStartMs";
 
     private static final String CHANNEL_ID = "mg4_recording";
     private static final int NOTIF_ID = 42;
@@ -98,6 +103,7 @@ public class RecordingService extends Service {
     private static volatile boolean sServiceRunning = false;
     /** Same process as the receivers, so they can act without a service round trip. */
     private static volatile RecordingService sInstance;
+    private static volatile boolean sWorkerActive = false;
 
     private final Object eventLock = new Object();
     private final Object stateLock = new Object();
@@ -118,16 +124,27 @@ public class RecordingService extends Service {
     private long completedSegmentCount = 0L;
     private volatile long lastSegmentCompletedMs = 0L;
     private static final long WATCHDOG_PERIOD_MS = 20_000L;
+    private static final long SUPERVISOR_PERIOD_MS = 20_000L;
     private static final long OEM_POLL_MS = 1_000L;
     private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
     private int awayPolls = 0;
     private boolean lastForeground = false;
+    private volatile boolean lastForegroundReading = false;
+    private final ExecutorService probeExecutor = Executors.newSingleThreadExecutor();
     private volatile long pausedSinceMs = 0L;
     /** A pause this long means a signal was missed; recording matters more. */
     private static final long MAX_OEM_PAUSE_MS = 60_000L;
 
     public static boolean isRunning() {
         return sServiceRunning;
+    }
+
+    /**
+     * Whether a worker is actually recording, which is not the same as the service existing: a
+     * sticky restart brings the service back with no worker at all.
+     */
+    public static boolean isRecordingActive() {
+        return sWorkerActive;
     }
 
     public static void startIfDashcamEnabled(Context context) {
@@ -229,15 +246,33 @@ public class RecordingService extends Service {
         super.onCreate();
         sServiceRunning = true;
         sInstance = this;
+        SharedPreferences p = prefs();
+        p.edit()
+                .putInt(KEY_SERVICE_STARTS, p.getInt(KEY_SERVICE_STARTS, 0) + 1)
+                .putLong(KEY_LAST_SERVICE_START, System.currentTimeMillis())
+                .apply();
         NotificationChannelHelper.ensureChannel(this, CHANNEL_ID, R.string.notification_channel_recording);
         restoreEventState();
+        mainHandler.postDelayed(supervisor, SUPERVISOR_PERIOD_MS);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null)
-            return START_STICKY;
-        String action = intent.getAction();
+        if (intent == null) {
+            // Android restarts a START_STICKY service with a null intent after killing the
+            // process. Returning here left the service alive with no worker: nothing recording,
+            // and - because the status had been persisted as RECORDING - a green badge over it.
+            // Restarting the loop is the entire reason this service is sticky.
+            DevRuntimeLog.add("RecordingService", "sticky restart after the process was killed");
+            SharedPreferences sp = prefs();
+            sp.edit().putInt(KEY_STICKY_RESTARTS, sp.getInt(KEY_STICKY_RESTARTS, 0) + 1).apply();
+            if (!prefs().getBoolean(DashcamSettings.KEY_ENABLED, false)) {
+                publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+        }
+        String action = intent == null ? null : intent.getAction();
 
         if (ACTION_STOP.equals(action)) {
             DevRuntimeLog.add("RecordingService", "ACTION_STOP");
@@ -426,17 +461,22 @@ public class RecordingService extends Service {
             Log.e(TAG, "recording loop died", t);
             DevRuntimeLog.add("RecordingService", "loop died: " + t);
             worker = null;
+            sWorkerActive = false;
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_LOOP_DIED);
             try {
                 CameraProbe.stopCombinedMp4Record();
             } catch (Throwable ignored) {
                 // the encoder may already be gone; nothing useful to do here
             }
-            stopServiceIfNotEjecting();
+            // Deliberately does not stop the service. Stopping it would take the supervisor with
+            // it, and then only the driver noticing a red badge could ever start recording
+            // again. Staying alive costs a retry every twenty seconds and heals by itself when
+            // the cause was temporary - the cameras held by the factory app, say.
         }
     }
 
     private void recordLoopBody() {
+        sWorkerActive = true;
         // NOTE: For now we only record MP4 clips, not speed or turn-signal data.
         SharedPreferences prefs = prefs();
         boolean enabled = prefs.getBoolean(DashcamSettings.KEY_ENABLED, false);
@@ -516,6 +556,7 @@ public class RecordingService extends Service {
         }
 
         worker = null;
+        sWorkerActive = false;
         if (!endedWithFatalError) {
             publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
         }
@@ -688,7 +729,11 @@ public class RecordingService extends Service {
                 return;
             }
             if (UiPrefs.isOemAvmCoexistEnabled(prefs())) {
-                boolean front = isOemAvmInForeground();
+                // getRunningTasks is a binder call. Once a second on the main thread it is a
+                // standing invitation to an ANR, and an ANR kills the process - which is one of
+                // the ways a recording can vanish without leaving anything behind.
+                boolean front = lastForegroundReading;
+                probeExecutor.execute(() -> lastForegroundReading = isOemAvmInForeground());
                 if (front != lastForeground) {
                     // Only on change: at one poll a second, logging every result would bury
                     // everything else in the runtime log.
@@ -751,10 +796,40 @@ public class RecordingService extends Service {
      * and then only updates between segments, so a loop that stops producing them leaves the
      * claim standing. If nothing completes for three segment lengths, say so.
      */
+    /**
+     * Runs for as long as the service does, not just for as long as the loop does.
+     *
+     * Today's failure was a service that came back from a sticky restart with no worker: the
+     * loop-bound watchdog could not fire because the loop had never started. A supervisor that
+     * outlives the loop is the only thing that catches the states nobody thought of.
+     */
+    private final Runnable supervisor = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                if (!stopRequested && !usbEjectInProgress && worker == null
+                        && prefs().getBoolean(DashcamSettings.KEY_ENABLED, false)) {
+                    DevRuntimeLog.add("RecordingService", "supervisor: enabled but no worker; restarting");
+                    stopRequested = false;
+                    startForeground(NOTIF_ID,
+                            buildNotification(getString(R.string.notification_recording_starting)));
+                    publishStatus(STATUS_STARTING, 0, TOTAL_CAMERAS, "");
+                    worker = new Thread(RecordingService.this::recordLoop, "RecordingServiceWorker");
+                    worker.start();
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "supervisor", t);
+            }
+            mainHandler.postDelayed(this, SUPERVISOR_PERIOD_MS);
+        }
+    };
+
     private void startWatchdog() {
         lastSegmentCompletedMs = System.currentTimeMillis();
         mainHandler.removeCallbacks(watchdog);
         mainHandler.removeCallbacks(oemForegroundWatch);
+        mainHandler.removeCallbacks(supervisor);
+        probeExecutor.shutdownNow();
         mainHandler.postDelayed(watchdog, WATCHDOG_PERIOD_MS);
     }
 
@@ -1346,7 +1421,10 @@ public class RecordingService extends Service {
      */
     public static void resetPersistedStatusIfStale(SharedPreferences prefs) {
         String status = prefs.getString(KEY_STATUS, STATUS_OFF);
-        if (status == null || STATUS_OFF.equals(status) || isRunning()) return;
+        // A live service is not a recording one. Checking only isRunning() let the badge stay
+        // green after a sticky restart, which is the worst thing a status can do.
+        if (status == null || STATUS_OFF.equals(status)
+                || (isRunning() && isRecordingActive())) return;
         prefs.edit()
                 .putString(KEY_STATUS, STATUS_OFF)
                 .putInt(KEY_ACTIVE_CAMERAS, 0)
@@ -1603,6 +1681,7 @@ public class RecordingService extends Service {
     public void onDestroy() {
         sServiceRunning = false;
         sInstance = null;
+        sWorkerActive = false;
         stopRequested = true;
         mainHandler.removeCallbacks(watchdog);
         cancelPendingErrorOverlay();
