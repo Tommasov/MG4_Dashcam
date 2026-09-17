@@ -1,0 +1,104 @@
+<resources>
+    <!-- app_name is not translated: it is the name on the launcher. -->
+
+    <!-- Schermata principale -->
+    <string name="section_recording">Registrazione</string>
+    <string name="section_storage">Archiviazione</string>
+    <string name="section_cameras">Telecamere</string>
+    <string name="section_vehicle">Veicolo</string>
+    <string name="dashcam_enabled">Registra in loop</string>
+    <string name="dashcam_enabled_summary">Parte con la testata e mantiene una memoria continua di spezzoni da 30 secondi.</string>
+    <string name="storage_target_internal">Solo memoria interna</string>
+    <string name="storage_target_auto">USB, con ripiego sulla memoria interna</string>
+    <string name="storage_target_usb">Solo USB</string>
+    <string name="label_records_path">Cartella di registrazione (vuota per quella predefinita)</string>
+    <string name="label_retention_internal">Spezzoni da tenere sulla memoria interna</string>
+    <string name="label_retention_usb">Spezzoni da tenere sulla USB</string>
+    <string name="label_max_event_dirs">Eventi salvati da tenere</string>
+    <string name="label_fps">Fotogrammi al secondo</string>
+    <string name="label_signature">Firma nella fascia inferiore</string>
+    <string name="label_show_speed">Mostra la velocità nella fascia inferiore</string>
+    <string name="label_oem_coexist">Cedi le telecamere alla vista 360/retromarcia di serie</string>
+    <string name="label_oem_coexist_summary">Con questa spenta, la telecamera di retromarcia di serie non può aprirsi mentre la dashcam registra.</string>
+    <string name="label_oem_max_speed">Cedi sotto questa velocità (km/h)</string>
+    <string name="label_oem_max_speed_summary">Sopra, la dashcam tiene le telecamere e la vista di serie non si apre. L\'app di fabbrica smette comunque di offrire la vista 360 intorno ai 15 km/h.</string>
+    <string name="camera_front">Anteriore</string>
+    <string name="camera_rear">Posteriore</string>
+    <string name="camera_left">Sinistra</string>
+    <string name="camera_right">Destra</string>
+    <string name="btn_test_clip">Registra uno spezzone di prova</string>
+    <string name="btn_eject_usb">Ferma ed espelli la USB</string>
+    <string name="btn_storage_details">Mostra i dettagli di archiviazione</string>
+    <string name="btn_send_probe">Manda un referto diagnostico</string>
+    <string name="probe_dialog_title">Mandare il referto all\'autore?</string>
+    <string name="probe_dialog_message">Parte il registro di esecuzione, il sondaggio dell\'archiviazione con i percorsi delle cartelle, l\'elenco della cartella dell\'app 360 di fabbrica, la versione dell\'app e il modello della testata. Nessun video, nessuna immagine, nessuna posizione. Finché non confermi non esce niente dall\'auto.</string>
+    <string name="probe_dialog_note_hint">Cosa stavi facendo? (aiuta molto)</string>
+    <string name="probe_dialog_send">Manda</string>
+    <string name="probe_sending">Invio in corso…</string>
+    <string name="probe_sent">Mandato: %1$s</string>
+    <string name="probe_failed">Non mandato: %1$s</string>
+    <string name="storage_details_working">Controllo in corso…</string>
+
+    <string name="section_oem">App 360 di fabbrica</string>
+    <string name="section_oem_summary">Questi agiscono sull\'app 360 di fabbrica (com.saicmotor.hmi.aroundview), non sulle registrazioni di questa dashcam. La sua schermata di prova nascosta lascia immagini .nv12 e spezzoni .h264 nella propria cartella e non li rimuove mai; entrambe le app girano come lo stesso utente di sistema, quindi da qui si possono leggere e cancellare.</string>
+    <string name="btn_copy_oem_captures">Copia fuori le catture dell\'app 360</string>
+    <string name="oem_captures_working">Copia in corso…</string>
+    <string name="btn_delete_oem_captures">Cancella le catture dentro l\'app 360</string>
+    <string name="oem_delete_title">Cancellare i file dentro l\'app 360 di fabbrica?</string>
+    <string name="oem_delete_message">Questo non tocca le tue registrazioni. Rimuove le immagini .nv12 e gli spezzoni .h264 lasciati nella cartella privata di com.saicmotor.hmi.aroundview, l\'app 360 di fabbrica. Tutto il resto in quella cartella resta dov\'è. Non si può annullare.</string>
+    <string name="oem_delete_confirm">Cancella</string>
+    <string name="oem_deleting">Cancellazione in corso…</string>
+
+    <string name="storage_status_checking">Controllo dell\'archiviazione…</string>
+    <string name="storage_status_internal">Interna: %1$s (USB: %2$s)</string>
+    <string name="storage_status_usb">USB: %1$s</string>
+    <string name="storage_status_unavailable">Nessuna archiviazione utilizzabile (USB: %1$s)</string>
+
+    <!-- Bollino di stato: corto per forza, si legge da un metro. -->
+    <string name="status_pill_on">ON</string>
+    <string name="status_pill_off">OFF</string>
+    <string name="status_pill_paused">PAUSA</string>
+    <string name="status_pill_error">ERRORE</string>
+    <string name="status_pill_starting">ATTESA</string>
+
+    <!-- Stato della registrazione -->
+    <string name="settings_dashcam_status_off">Spenta</string>
+    <string name="settings_dashcam_status_starting">Avvio…</string>
+    <string name="settings_dashcam_status_recording">Registra %1$d/%2$d telecamere</string>
+    <string name="settings_dashcam_status_paused_oem">In pausa per la vista 360 di serie</string>
+    <string name="settings_dashcam_status_error">Errore: %1$s</string>
+
+    <!-- Notifica -->
+    <string name="notification_channel_recording">Registrazione dashcam</string>
+    <string name="notification_recording_starting">Avvio…</string>
+    <string name="notification_recording_status">Registra %1$d/%2$d telecamere</string>
+    <string name="notification_recording_paused_oem">In pausa per la vista 360 di serie</string>
+    <string name="notification_recording_error">Problema di registrazione: %1$s</string>
+
+    <!-- Avvisi brevi -->
+    <string name="notice_event_saved">Evento salvato</string>
+    <string name="notice_event_future_only">Evento: registro i prossimi spezzoni</string>
+    <string name="notice_oem_pause">Dashcam in pausa per la vista 360 di serie</string>
+    <string name="notice_oem_resume">Dashcam ripartita</string>
+    <string name="notice_recording_recovered">Registrazione ripresa</string>
+
+    <!-- Errori -->
+    <string name="dashcam_recording_error_overlay_subtitle_generic">Problema di registrazione</string>
+    <string name="dashcam_recording_error_overlay_subtitle_storage">Problema di archiviazione</string>
+    <string name="dashcam_recording_error_overlay_subtitle_start_failed">Telecamere non disponibili</string>
+    <string name="dashcam_recording_error_overlay_subtitle_stop_failed">Spezzone non chiuso</string>
+    <string name="dashcam_recording_error_overlay_subtitle_usb_unavailable">USB non disponibile</string>
+    <string name="dashcam_recording_error_overlay_subtitle_usb_fallback">Passata alla memoria interna</string>
+    <string name="dashcam_recording_error_overlay_subtitle_stalled">Registrazione bloccata</string>
+    <string name="notification_dashcam_recording_error_text">La dashcam ha smesso di registrare.</string>
+    <string name="notification_dashcam_recording_error_stalled_text">Non viene scritto uno spezzone da un po\'. Spegni e riaccendi l\'interruttore.</string>
+    <string name="notification_dashcam_recording_error_storage_text">Non riesco a scrivere nella cartella di registrazione.</string>
+    <string name="notification_dashcam_recording_error_start_failed_text">Non è stato possibile aprire le telecamere.</string>
+    <string name="notification_dashcam_recording_error_stop_failed_text">L\'ultimo spezzone non è stato chiuso correttamente.</string>
+    <string name="notification_dashcam_recording_error_usb_unavailable_text">La chiavetta USB non c\'è più e la destinazione è solo USB.</string>
+    <string name="notification_dashcam_recording_error_usb_fallback_text">La USB non c\'è più; la registrazione continua sulla memoria interna.</string>
+
+    <!-- Espulsione USB -->
+    <string name="settings_dashcam_storage_eject_ready_message">Puoi rimuovere la chiavetta USB.</string>
+    <string name="settings_dashcam_storage_eject_unavailable_message">Nessuna chiavetta USB in uso.</string>
+</resources>

@@ -29,6 +29,14 @@
     <string name="btn_test_clip">Record a test clip</string>
     <string name="btn_eject_usb">Stop and eject USB</string>
     <string name="btn_storage_details">Show storage details</string>
+    <string name="btn_send_probe">Send a diagnostics report</string>
+    <string name="probe_dialog_title">Send this report to the author?</string>
+    <string name="probe_dialog_message">It sends the runtime log, the storage probe with its folder paths, a listing of the factory 360 app folder, the app version and the head unit model. No video, no images, no location. Nothing leaves the car until you confirm.</string>
+    <string name="probe_dialog_note_hint">What were you doing? (helps a lot)</string>
+    <string name="probe_dialog_send">Send</string>
+    <string name="probe_sending">Sending…</string>
+    <string name="probe_sent">Sent: %1$s</string>
+    <string name="probe_failed">Not sent: %1$s</string>
     <string name="storage_details_working">Checking…</string>
     <string name="section_oem">Factory 360 app</string>
     <string name="section_oem_summary">These act on the factory around-view app (com.saicmotor.hmi.aroundview), not on the recordings made by this dashcam. Its hidden test screen leaves raw .nv12 stills and .h264 clips in its own folder and never removes them; both apps run as the same system user, so they can be read and cleared from here.</string>

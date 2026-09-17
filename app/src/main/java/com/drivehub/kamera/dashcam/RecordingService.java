@@ -121,6 +121,10 @@ public class RecordingService extends Service {
     private static final long OEM_POLL_MS = 1_000L;
     private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
     private int awayPolls = 0;
+    private boolean lastForeground = false;
+    private volatile long pausedSinceMs = 0L;
+    /** A pause this long means a signal was missed; recording matters more. */
+    private static final long MAX_OEM_PAUSE_MS = 60_000L;
 
     public static boolean isRunning() {
         return sServiceRunning;
@@ -198,6 +202,7 @@ public class RecordingService extends Service {
             return;
         }
         DevRuntimeLog.add("RecordingService", "oem pause: releasing cameras now");
+        pausedSinceMs = System.currentTimeMillis();
         oemPauseRequested = true;
         segmentStopRequested = true;
         synchronized (stateLock) {
@@ -302,6 +307,8 @@ public class RecordingService extends Service {
             boolean wasPaused = STATUS_PAUSED_OEM.equals(prefs().getString(KEY_STATUS, STATUS_OFF));
             oemPauseRequested = false;
             segmentStopRequested = false;
+            pausedSinceMs = 0L;
+            awayPolls = 0;
             synchronized (stateLock) {
                 stateLock.notifyAll();
             }
@@ -682,8 +689,16 @@ public class RecordingService extends Service {
             }
             if (UiPrefs.isOemAvmCoexistEnabled(prefs())) {
                 boolean front = isOemAvmInForeground();
+                if (front != lastForeground) {
+                    // Only on change: at one poll a second, logging every result would bury
+                    // everything else in the runtime log.
+                    DevRuntimeLog.add("RecordingService",
+                            "oem foreground=" + front + " (paused=" + oemPauseRequested + ")");
+                    lastForeground = front;
+                }
                 if (front && !oemPauseRequested) {
                     DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
+                    pausedSinceMs = System.currentTimeMillis();
                     beginOemPauseNow();
                     publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
                     awayPolls = 0;
@@ -696,6 +711,17 @@ public class RecordingService extends Service {
                     }
                 } else {
                     awayPolls = 0;
+                }
+                // Last resort. Whatever went wrong - a signal we never saw, a foreground reading
+                // that stays stale, a broadcast that never came - a dashcam that stays paused is
+                // a dashcam that is not recording. Contending briefly with the factory camera is
+                // the lesser failure.
+                if (oemPauseRequested && pausedSinceMs > 0
+                        && System.currentTimeMillis() - pausedSinceMs > MAX_OEM_PAUSE_MS) {
+                    DevRuntimeLog.add("RecordingService",
+                            "paused for over " + (MAX_OEM_PAUSE_MS / 1000) + "s; forcing resume");
+                    pausedSinceMs = 0L;
+                    resumeAfterOemRequest(RecordingService.this);
                 }
             }
             mainHandler.postDelayed(this, OEM_POLL_MS);

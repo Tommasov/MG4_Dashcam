@@ -4,6 +4,7 @@ import com.drivehub.kamera.dashcam.DashcamSettings;
 import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
 import com.drivehub.kamera.dev.DevRuntimeLog;
+import com.drivehub.kamera.dev.ProbeReport;
 import com.drivehub.kamera.dev.OemCaptures;
 import com.drivehub.kamera.settings.UiPrefs;
 
@@ -15,11 +16,13 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.View;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.RadioGroup;
@@ -67,6 +70,7 @@ public class MainActivity extends AppCompatActivity {
     private CheckBox cbRight;
 
     private boolean syncing = false;
+    private long visibleSinceMs = 0L;
 
     private final BroadcastReceiver statusReceiver = new BroadcastReceiver() {
         @Override
@@ -130,6 +134,12 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btnStorageDetails).setOnClickListener(v -> showStorageDetails());
+
+        // Offered only when this build carries a probe key; a button that can only fail is
+        // worse than no button.
+        View sendProbe = findViewById(R.id.btnSendProbe);
+        sendProbe.setVisibility(ProbeReport.isConfigured() ? View.VISIBLE : View.GONE);
+        sendProbe.setOnClickListener(v -> confirmSendProbe());
         findViewById(R.id.btnCopyOemCaptures).setOnClickListener(v -> copyOemCaptures());
         findViewById(R.id.btnDeleteOemCaptures).setOnClickListener(v -> confirmDeleteOemCaptures());
 
@@ -150,13 +160,36 @@ public class MainActivity extends AppCompatActivity {
                 ejectReceiver,
                 new IntentFilter(RecordingService.ACTION_USB_EJECT_READY),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+        visibleSinceMs = System.currentTimeMillis();
+        DevRuntimeLog.add("MainActivity", "onResume");
         RecordingService.resetPersistedStatusIfStale(prefs());
         refreshStatus();
         refreshStorageStatus();
     }
 
+    /**
+     * Records how the screen went away, because "it closes by itself after a while" has two very
+     * different causes. If something finished the activity - a back press, real or synthesised,
+     * or the car blocking a screen it does not want shown - isFinishing() is true. If something
+     * merely came on top, it is false. The elapsed time says whether it is on a timer.
+     */
+    private void logVisibilityChange(String event) {
+        long shown = visibleSinceMs > 0 ? (System.currentTimeMillis() - visibleSinceMs) / 1000 : -1;
+        DevRuntimeLog.add("MainActivity", event
+                + " after " + shown + "s"
+                + " finishing=" + isFinishing()
+                + " changingConfig=" + isChangingConfigurations());
+    }
+
+    @Override
+    protected void onStop() {
+        logVisibilityChange("onStop");
+        super.onStop();
+    }
+
     @Override
     protected void onPause() {
+        logVisibilityChange("onPause");
         for (BroadcastReceiver receiver : new BroadcastReceiver[] { statusReceiver, ejectReceiver }) {
             try {
                 unregisterReceiver(receiver);
@@ -360,6 +393,68 @@ public class MainActivity extends AppCompatActivity {
             final String finalResult = result + "\n\n" + safeOemListing();
             mainHandler.post(() -> details.setText(finalResult));
         });
+    }
+
+    /**
+     * Asks before anything leaves the car, and asks for one line of context while it is at it.
+     *
+     * A log that arrives on its own is half a report: it says what happened, not what the
+     * driver was trying to do. The dialog also spells out exactly what is in the report, which
+     * is the only way someone can consent to sending it.
+     */
+    private void confirmSendProbe() {
+        final EditText note = new EditText(this);
+        note.setHint(R.string.probe_dialog_note_hint);
+        note.setTextSize(20f);
+        int pad = getResources().getDimensionPixelSize(R.dimen.screen_padding);
+        note.setPadding(pad, pad / 2, pad, pad / 2);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.probe_dialog_title)
+                .setMessage(R.string.probe_dialog_message)
+                .setView(note)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.probe_dialog_send,
+                        (d, which) -> sendProbe(note.getText().toString()))
+                .show();
+    }
+
+    private void sendProbe(String note) {
+        TextView details = findViewById(R.id.tvStorageDetails);
+        details.setText(R.string.probe_sending);
+        ioExecutor.execute(() -> {
+            final String body = buildReport();
+            ProbeReport.send(this, note, body, new ProbeReport.Callback() {
+                @Override
+                public void onSent(String reportName) {
+                    details.setText(getString(R.string.probe_sent, reportName));
+                }
+
+                @Override
+                public void onFailed(String reason) {
+                    details.setText(getString(R.string.probe_failed, reason));
+                }
+            });
+        });
+    }
+
+    /** The same thing the details button prints, with a header saying which car and build. */
+    private String buildReport() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("fingerprint: ").append(Build.FINGERPRINT).append("\n");
+        sb.append("android: ").append(Build.VERSION.RELEASE)
+                .append(" / API ").append(Build.VERSION.SDK_INT).append("\n");
+        sb.append("uid: ").append(android.os.Process.myUid()).append("\n");
+        try {
+            sb.append("\n").append(DashcamStorageManager.describeProbe(this)).append("\n");
+        } catch (Throwable t) {
+            sb.append("storage probe failed: ").append(t).append("\n");
+        }
+        sb.append("\n").append("== 360 app captures ==").append("\n")
+                .append(safeOemListing());
+        sb.append("\n").append("== runtime log ==").append("\n")
+                .append(DevRuntimeLog.snapshot()).append("\n");
+        return sb.toString();
     }
 
     // ---------- Status ----------

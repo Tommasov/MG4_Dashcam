@@ -333,6 +333,12 @@
                 android:text="@string/btn_delete_oem_captures" />
 
             <Button
+                android:id="@+id/btnSendProbe"
+                style="@style/TonalButton"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:text="@string/btn_send_probe" />
+
+            <Button
                 android:id="@+id/btnTestClip"
                 style="@style/TonalButton"
                 android:text="@string/btn_test_clip" />

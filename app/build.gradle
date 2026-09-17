@@ -1,5 +1,15 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
+}
+
+// The probe write key lives in apikeys.properties (git-ignored). A missing key is not a build
+// error: the send button is simply not offered, so a fresh clone still builds and still runs.
+def apiKeysFile = rootProject.file("apikeys.properties")
+def apiKeys = new Properties()
+if (apiKeysFile.exists()) {
+    apiKeysFile.withInputStream { apiKeys.load(it) }
 }
 
 android {
@@ -17,14 +27,23 @@ android {
         applicationId "com.tommasov.mg4dashcam"
         minSdk 28
         targetSdk 36
-        versionCode 16
-        versionName "0.1.0-beta.5"
+        versionCode 18
+        versionName "0.1.0-beta.7"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters "arm64-v8a"
         }
+
+        buildConfigField "String", "PROBE_URL",
+                "\"https://ws2.tommasovietina.it/mg4/probe.php\""
+        // Which drawer a report lands in on the probe: one per app.
+        buildConfigField "String", "PROBE_APP", "\"dashcam\""
+        // Ships inside the APK, so anyone who unzips one can read it. That is why the probe
+        // can only accept a report: it cannot read one back, list them or delete anything.
+        buildConfigField "String", "PROBE_KEY",
+                "\"" + apiKeys.getProperty("probe.key", "") + "\""
     }
 
     buildTypes {

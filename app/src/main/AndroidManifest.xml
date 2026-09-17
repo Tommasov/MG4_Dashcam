@@ -7,6 +7,9 @@
     <!-- The system shared user above is what lets the native library open /dev/video*.
          It only takes effect if the APK is signed with the head unit's platform key. -->
 
+    <!-- Only for the diagnostics probe, which sends nothing without an explicit confirmation. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
