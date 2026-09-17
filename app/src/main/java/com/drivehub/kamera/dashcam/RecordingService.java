@@ -41,6 +41,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.json.JSONArray;
@@ -140,8 +141,22 @@ public class RecordingService extends Service {
     private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
     private int awayPolls = 0;
     private boolean lastForeground = false;
-    private volatile boolean lastForegroundReading = false;
-    private final ExecutorService probeExecutor = Executors.newSingleThreadExecutor();
+    /**
+     * The hand-off runs here rather than on the main thread. {@code getRunningTasks} is a binder
+     * call, and once a second on the main thread it is a standing invitation to an ANR.
+     *
+     * <p>It was answered once by reading the previous poll's result on the main thread and
+     * refreshing it in the background, which kept the main thread free but made every reading a
+     * second old. A second is the whole budget: by the time the factory camera is seen in the
+     * foreground it has already opened the device, our V4L2 stream breaks under it and the
+     * native encoder aborts the process. Reading and reacting on the same background thread
+     * keeps the main thread free and the reading current.
+     */
+    private final ScheduledExecutorService oemPollExecutor =
+            Executors.newSingleThreadScheduledExecutor(
+                    r -> new Thread(r, "RecordingServiceOemWatch"));
+    /** Bumped when a session starts, so an older chain of polls retires instead of doubling up. */
+    private volatile int oemWatchGeneration = 0;
     private volatile long pausedSinceMs = 0L;
     /** A pause this long means a signal was missed; recording matters more. */
     private static final long MAX_OEM_PAUSE_MS = 60_000L;
@@ -531,10 +546,7 @@ public class RecordingService extends Service {
         // the answer to the runtime log and does nothing else; see VehicleGearProbe.
         VehicleGearProbe.probe(this);
         mainHandler.post(this::startWatchdog);
-        mainHandler.post(() -> {
-            mainHandler.removeCallbacks(oemForegroundWatch);
-            mainHandler.postDelayed(oemForegroundWatch, OEM_POLL_MS);
-        });
+        startOemWatch();
 
         boolean endedWithFatalError = false;
 
@@ -752,24 +764,38 @@ public class RecordingService extends Service {
      * It also covers the other half: if the AVM goes away without sending ACTION_STOP — a
      * crash, a force-stop — nothing would otherwise resume recording.
      */
-    private final Runnable oemForegroundWatch = new Runnable() {
-        @Override
-        public void run() {
-            if (worker == null || stopRequested) {
-                return;
-            }
+    private void startOemWatch() {
+        scheduleOemPoll(++oemWatchGeneration);
+    }
+
+    private void scheduleOemPoll(int generation) {
+        try {
+            oemPollExecutor.schedule(
+                    () -> pollOemForeground(generation), OEM_POLL_MS, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException e) {
+            // The service is on its way out. Losing the hand-off is a worse turn for the factory
+            // camera, not a reason to take the process down with us.
+            DevRuntimeLog.add("RecordingService", "oem watch not scheduled: " + e);
+        }
+    }
+
+    /**
+     * One look at what is on screen, and the hand-off that follows from it.
+     *
+     * <p>Reschedules itself at the end rather than running on a fixed rate: a poll that overran
+     * would otherwise queue up behind itself, and a burst of catching-up polls is the last thing
+     * a camera hand-off needs.
+     */
+    private void pollOemForeground(int generation) {
+        if (generation != oemWatchGeneration || worker == null || stopRequested) {
+            return;
+        }
+        try {
             if (UiPrefs.isOemAvmCoexistEnabled(prefs())) {
-                // getRunningTasks is a binder call. Once a second on the main thread it is a
-                // standing invitation to an ANR, and an ANR kills the process - which is one of
-                // the ways a recording can vanish without leaving anything behind.
-                boolean front = lastForegroundReading;
-                try {
-                    probeExecutor.execute(() -> lastForegroundReading = isOemAvmInForeground());
-                } catch (RejectedExecutionException e) {
-                    // The executor is gone, so the reading goes stale; that is a worse hand-off
-                    // to the factory camera, not a reason to take the process down with us.
-                    DevRuntimeLog.add("RecordingService", "oem probe rejected: " + e);
-                }
+                    // Synchronous, and current. This is the background thread the watch runs on,
+                    // so the binder call costs the main thread nothing and the answer is the one
+                    // that is true right now, which is the only kind worth acting on.
+                boolean front = isOemAvmInForeground();
                 if (front != lastForeground) {
                     // Only on change: at one poll a second, logging every result would bury
                     // everything else in the runtime log.
@@ -788,7 +814,7 @@ public class RecordingService extends Service {
                     if (++awayPolls >= 2) {
                         DevRuntimeLog.add("RecordingService", "oem gone from foreground; resuming");
                         awayPolls = 0;
-                        resumeAfterOemRequest(RecordingService.this);
+                        resumeAfterOemRequest(this);
                     }
                 } else {
                     awayPolls = 0;
@@ -802,12 +828,16 @@ public class RecordingService extends Service {
                     DevRuntimeLog.add("RecordingService",
                             "paused for over " + (MAX_OEM_PAUSE_MS / 1000) + "s; forcing resume");
                     pausedSinceMs = 0L;
-                    resumeAfterOemRequest(RecordingService.this);
+                    resumeAfterOemRequest(this);
                 }
             }
-            mainHandler.postDelayed(this, OEM_POLL_MS);
+        } catch (Throwable t) {
+            // Nothing here is worth the process. A missed poll is a second of contention with
+            // the factory camera; an exception out of this thread would be the end of recording.
+            Log.w(TAG, "oem watch", t);
         }
-    };
+        scheduleOemPoll(generation);
+    }
 
     /**
      * getRunningTasks is restricted, but this app is the system user, which is the same reason
@@ -863,7 +893,6 @@ public class RecordingService extends Service {
     private void startWatchdog() {
         lastSegmentCompletedMs = System.currentTimeMillis();
         mainHandler.removeCallbacks(watchdog);
-        mainHandler.removeCallbacks(oemForegroundWatch);
         // Nothing else is cancelled here. Two things used to be, and both were wrong:
         //
         // The supervisor is meant to outlive the loop - that is its entire job - and removing it
@@ -1762,10 +1791,10 @@ public class RecordingService extends Service {
         sWorkerActive = false;
         stopRequested = true;
         mainHandler.removeCallbacks(watchdog);
-        mainHandler.removeCallbacks(oemForegroundWatch);
         mainHandler.removeCallbacks(supervisor);
         cancelPendingErrorOverlay();
-        probeExecutor.shutdownNow();
+        oemWatchGeneration++;
+        oemPollExecutor.shutdownNow();
         eventCopyExecutor.shutdown();
         if (worker != null) {
             worker.interrupt();
