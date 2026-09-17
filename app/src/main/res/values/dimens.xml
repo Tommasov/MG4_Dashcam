@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sized for the head unit: 1920x720, read at arm's length, operated with a thumb.
+
+     The type scale is the factory launcher's own vocabulary, read from its layouts and already
+     carried into MG4 Simple Launcher: card title 30, body/label 28, emphasised value 32,
+     button 26, secondary 20. The factory declares those in px and this app in sp, which
+     coincide at the head unit's density while sp also follows the system font-size setting. -->
+<resources>
+    <dimen name="screen_padding">24dp</dimen>
+    <dimen name="column_gap">48dp</dimen>
+
+    <dimen name="title_size">30sp</dimen>
+    <!-- The one number read at a glance while the car is moving. -->
+    <dimen name="status_size">32sp</dimen>
+    <dimen name="section_header_size">20sp</dimen>
+    <dimen name="row_label_size">28sp</dimen>
+    <dimen name="secondary_text_size">20sp</dimen>
+    <dimen name="field_size">28sp</dimen>
+    <dimen name="button_size">26sp</dimen>
+    <!-- Probe output: dense reference material, not glanceable. A tier below the rest, as the
+         launcher does with its own diagnostics screen. -->
+    <dimen name="mono_size">16sp</dimen>
+
+    <!-- The whole row is the touch target, not just the control: a thumb-sized switch is a
+         poor thing to aim at from the driver's seat. -->
+    <dimen name="row_height">88dp</dimen>
+    <dimen name="row_gap">18dp</dimen>
+    <dimen name="section_gap">36dp</dimen>
+
+    <dimen name="button_radius">10dp</dimen>
+    <dimen name="button_padding_h">24dp</dimen>
+    <dimen name="button_padding_v">12dp</dimen>
+    <dimen name="button_gap">16dp</dimen>
+
+    <dimen name="field_margin_top">12dp</dimen>
+    <!-- A number field wide enough for four digits. match_parent would give "5" most of a
+         column, which reads as a mistake rather than as room. -->
+    <dimen name="field_width_short">220dp</dimen>
+    <!-- Longest comfortable measure for running text. The screen is 1920 wide; a line that
+         uses all of it cannot be read, the eye loses the return. -->
+    <dimen name="text_measure_max">1100dp</dimen>
+    <dimen name="status_pill_padding_h">28dp</dimen>
+    <dimen name="status_pill_padding_v">8dp</dimen>
+    <!-- Between a switch label and its lever. SwitchCompat reads this from the app namespace,
+         not the android one. -->
+    <dimen name="switch_padding">24dp</dimen>
+    <dimen name="hairline_height">1dp</dimen>
+</resources>

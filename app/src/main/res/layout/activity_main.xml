@@ -1,256 +1,333 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 1920x720 head unit: one scrolling column, generous touch targets, no chrome. -->
+<!-- 1920x720, read at arm's length. Two columns rather than one: at the head unit's type size
+     a single column would run several screens deep while leaving two thirds of the width
+     empty. The switch and the status sit above both columns, because they are what someone
+     opens this app to see. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/settings_surface"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="@dimen/screen_padding">
 
-        <TextView
-            android:layout_width="wrap_content"
+        <!-- Header: what this is, and what it is doing right now. -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textColor="@color/settings_text_primary"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:baselineAligned="true"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/app_name"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/title_size"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvStatusDetail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:gravity="end"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/secondary_text_size" />
+
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:background="@drawable/bg_status_pill"
+                android:minWidth="140dp"
+                android:paddingStart="@dimen/status_pill_padding_h"
+                android:paddingEnd="@dimen/status_pill_padding_h"
+                android:paddingTop="@dimen/status_pill_padding_v"
+                android:paddingBottom="@dimen/status_pill_padding_v"
+                android:gravity="center"
+                android:textSize="@dimen/status_size"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/swEnabled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:minHeight="56dp"
-            android:text="@string/dashcam_enabled"
-            android:textColor="@color/settings_text_primary"
-            android:textSize="18sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/dashcam_enabled_summary"
-            android:textColor="@color/settings_text_secondary"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textColor="@color/settings_text_highlight"
-            android:textSize="16sp" />
-
-        <!-- Storage -->
-        <TextView
-            style="@style/DashcamSectionHeader"
-            android:text="@string/section_storage" />
-
-        <RadioGroup
-            android:id="@+id/rgStorageTarget"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <RadioButton
-                android:id="@+id/rbStorageInternal"
-                style="@style/DashcamChoice"
-                android:text="@string/storage_target_internal" />
-
-            <RadioButton
-                android:id="@+id/rbStorageAuto"
-                style="@style/DashcamChoice"
-                android:text="@string/storage_target_auto" />
-
-            <RadioButton
-                android:id="@+id/rbStorageUsb"
-                style="@style/DashcamChoice"
-                android:text="@string/storage_target_usb" />
-        </RadioGroup>
-
-        <TextView
-            android:id="@+id/tvStorageStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="@color/settings_text_muted"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/btnEjectUsb"
+            style="@style/Choice"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:minHeight="52dp"
-            android:text="@string/btn_eject_usb" />
+            app:switchPadding="@dimen/switch_padding"
+            android:background="@null"
+            android:thumb="@drawable/switch_thumb_selector"
+            app:track="@drawable/switch_track_selector"
+            android:layout_marginTop="@dimen/row_gap"
+            android:text="@string/dashcam_enabled" />
 
         <TextView
-            style="@style/DashcamFieldLabel"
-            android:text="@string/label_records_path" />
+            style="@style/Hint"
+            android:maxWidth="@dimen/text_measure_max"
+            android:text="@string/dashcam_enabled_summary" />
 
-        <EditText
-            android:id="@+id/etRecordsPath"
-            style="@style/DashcamField"
-            android:inputType="textUri"
-            android:autofillHints="" />
+        <View style="@style/Hairline" />
 
-        <TextView
-            style="@style/DashcamFieldLabel"
-            android:text="@string/label_retention_internal" />
-
-        <EditText
-            android:id="@+id/etRetentionInternal"
-            style="@style/DashcamField"
-            android:inputType="number"
-            android:autofillHints="" />
-
-        <TextView
-            style="@style/DashcamFieldLabel"
-            android:text="@string/label_retention_usb" />
-
-        <EditText
-            android:id="@+id/etRetentionUsb"
-            style="@style/DashcamField"
-            android:inputType="number"
-            android:autofillHints="" />
-
-        <TextView
-            style="@style/DashcamFieldLabel"
-            android:text="@string/label_max_event_dirs" />
-
-        <EditText
-            android:id="@+id/etMaxEventDirs"
-            style="@style/DashcamField"
-            android:inputType="number"
-            android:autofillHints="" />
-
-        <!-- Cameras -->
-        <TextView
-            style="@style/DashcamSectionHeader"
-            android:text="@string/section_cameras" />
-
-        <CheckBox
-            android:id="@+id/cbFront"
-            style="@style/DashcamChoice"
-            android:text="@string/camera_front" />
-
-        <CheckBox
-            android:id="@+id/cbRear"
-            style="@style/DashcamChoice"
-            android:text="@string/camera_rear" />
-
-        <CheckBox
-            android:id="@+id/cbLeft"
-            style="@style/DashcamChoice"
-            android:text="@string/camera_left" />
-
-        <CheckBox
-            android:id="@+id/cbRight"
-            style="@style/DashcamChoice"
-            android:text="@string/camera_right" />
-
-        <!-- Recording -->
-        <TextView
-            style="@style/DashcamSectionHeader"
-            android:text="@string/section_recording" />
-
-        <TextView
-            style="@style/DashcamFieldLabel"
-            android:text="@string/label_fps" />
-
-        <EditText
-            android:id="@+id/etFps"
-            style="@style/DashcamField"
-            android:inputType="number"
-            android:autofillHints="" />
-
-        <TextView
-            style="@style/DashcamFieldLabel"
-            android:text="@string/label_signature" />
-
-        <EditText
-            android:id="@+id/etSignature"
-            style="@style/DashcamField"
-            android:inputType="text"
-            android:autofillHints="" />
-
-        <androidx.appcompat.widget.SwitchCompat
-            android:id="@+id/swShowSpeed"
-            style="@style/DashcamChoice"
-            android:text="@string/label_show_speed" />
-
-        <!-- Vehicle -->
-        <TextView
-            style="@style/DashcamSectionHeader"
-            android:text="@string/section_vehicle" />
-
-        <androidx.appcompat.widget.SwitchCompat
-            android:id="@+id/swOemCoexist"
-            style="@style/DashcamChoice"
-            android:text="@string/label_oem_coexist" />
-
-        <TextView
+        <!-- Two columns -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/label_oem_coexist_summary"
-            android:textColor="@color/settings_text_secondary"
-            android:textSize="13sp" />
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/btnStorageDetails"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:minHeight="56dp"
-            android:text="@string/btn_storage_details" />
+            <!-- Left: where the clips go -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
 
+                <TextView
+                    style="@style/SectionHeader"
+                    android:text="@string/section_storage" />
+
+                <RadioGroup
+                    android:id="@+id/rgStorageTarget"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/rbStorageInternal"
+                        style="@style/Choice"
+                        android:text="@string/storage_target_internal" />
+
+                    <RadioButton
+                        android:id="@+id/rbStorageAuto"
+                        style="@style/Choice"
+                        android:text="@string/storage_target_auto" />
+
+                    <RadioButton
+                        android:id="@+id/rbStorageUsb"
+                        style="@style/Choice"
+                        android:text="@string/storage_target_usb" />
+                </RadioGroup>
+
+                <TextView
+                    android:id="@+id/tvStorageStatus"
+                    style="@style/Hint"
+                    android:layout_marginTop="4dp" />
+
+                <Button
+                    android:id="@+id/btnEjectUsb"
+                    style="@style/TonalButton"
+                    android:text="@string/btn_eject_usb" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_records_path" />
+
+                <EditText
+                    android:id="@+id/etRecordsPath"
+                    style="@style/Field"
+                    android:autofillHints=""
+                    android:inputType="textUri" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_retention_internal" />
+
+                <EditText
+                    android:id="@+id/etRetentionInternal"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_retention_usb" />
+
+                <EditText
+                    android:id="@+id/etRetentionUsb"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_max_event_dirs" />
+
+                <EditText
+                    android:id="@+id/etMaxEventDirs"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="@dimen/column_gap"
+                android:layout_height="1dp" />
+
+            <!-- Right: what gets recorded -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/SectionHeader"
+                    android:text="@string/section_cameras" />
+
+                <!-- Two by two: four stacked rows would run half a screen deep for four
+                     words, and the width is there. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <CheckBox
+                        android:id="@+id/cbFront"
+                        style="@style/Choice"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:text="@string/camera_front" />
+
+                    <CheckBox
+                        android:id="@+id/cbRear"
+                        style="@style/Choice"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:text="@string/camera_rear" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <CheckBox
+                        android:id="@+id/cbLeft"
+                        style="@style/Choice"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:text="@string/camera_left" />
+
+                    <CheckBox
+                        android:id="@+id/cbRight"
+                        style="@style/Choice"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:text="@string/camera_right" />
+                </LinearLayout>
+
+                <TextView
+                    style="@style/SectionHeader"
+                    android:text="@string/section_recording" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_fps" />
+
+                <EditText
+                    android:id="@+id/etFps"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_signature" />
+
+                <EditText
+                    android:id="@+id/etSignature"
+                    style="@style/Field"
+                    android:autofillHints=""
+                    android:inputType="text" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swShowSpeed"
+                    style="@style/Choice"
+                    android:layout_width="wrap_content"
+                    app:switchPadding="@dimen/switch_padding"
+            android:background="@null"
+            android:thumb="@drawable/switch_thumb_selector"
+            app:track="@drawable/switch_track_selector"
+                    android:layout_marginTop="@dimen/row_gap"
+                    android:text="@string/label_show_speed" />
+
+                <TextView
+                    style="@style/SectionHeader"
+                    android:text="@string/section_vehicle" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swOemCoexist"
+                    style="@style/Choice"
+                    android:layout_width="wrap_content"
+                    app:switchPadding="@dimen/switch_padding"
+            android:background="@null"
+            android:thumb="@drawable/switch_thumb_selector"
+            app:track="@drawable/switch_track_selector"
+                    android:text="@string/label_oem_coexist" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:text="@string/label_oem_coexist_summary" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View style="@style/Hairline" />
+
+        <!-- Full width: the tools, and the report they print -->
         <TextView
-            style="@style/DashcamSectionHeader"
+            style="@style/SectionHeader"
             android:text="@string/section_oem" />
 
         <TextView
+            style="@style/Hint"
+            android:maxWidth="@dimen/text_measure_max"
+            android:text="@string/section_oem_summary" />
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/section_oem_summary"
-            android:textColor="@color/settings_text_secondary"
-            android:textSize="13sp" />
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/btnCopyOemCaptures"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:minHeight="52dp"
-            android:text="@string/btn_copy_oem_captures" />
+            <Button
+                android:id="@+id/btnStorageDetails"
+                style="@style/TonalButton"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:text="@string/btn_storage_details" />
 
-        <Button
-            android:id="@+id/btnDeleteOemCaptures"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:minHeight="52dp"
-            android:text="@string/btn_delete_oem_captures" />
+            <Button
+                android:id="@+id/btnCopyOemCaptures"
+                style="@style/TonalButton"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:text="@string/btn_copy_oem_captures" />
+
+            <Button
+                android:id="@+id/btnDeleteOemCaptures"
+                style="@style/TonalButton"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:textColor="@color/warning"
+                android:text="@string/btn_delete_oem_captures" />
+
+            <Button
+                android:id="@+id/btnTestClip"
+                style="@style/TonalButton"
+                android:text="@string/btn_test_clip" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvStorageDetails"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="@dimen/row_gap"
+            android:layout_marginBottom="@dimen/screen_padding"
             android:fontFamily="monospace"
-            android:textColor="@color/settings_text_muted"
-            android:textSize="12sp" />
-
-        <Button
-            android:id="@+id/btnTestClip"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:layout_marginBottom="24dp"
-            android:minHeight="56dp"
-            android:text="@string/btn_test_clip" />
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/mono_size" />
     </LinearLayout>
 </ScrollView>

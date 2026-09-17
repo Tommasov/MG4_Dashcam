@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Night palette, same source as the day one: MG4 Simple Launcher.
+
+     The accent is not the day blue. SAIC blue (#056eff) falls to about 3:1 against a charcoal
+     background, where readable text wants 4.5:1, and it reads muddy rather than bright. The
+     constructor solves it the same way in its own dark theme, lifting its charging accent from
+     #4b8fff to #b2cfff; this value sits between the two. -->
+<resources>
+    <color name="text_primary">#f2f5f7</color>
+    <color name="text_secondary">#99ffffff</color>
+    <color name="text_tertiary">#52ffffff</color>
+
+    <color name="accent">#7fb0ff</color>
+    <color name="accent_pressed">#5d95e6</color>
+
+    <!-- The stock dock at night is #1c1c1c, same reasoning as the day value. -->
+    <color name="surface">#1c1c1c</color>
+
+    <!-- The tonal surfaces invert: a wash of white instead of one of black, which over a dark
+         ground is the difference between a visible surface and none. -->
+    <color name="button_surface">#26ffffff</color>
+    <color name="button_surface_pressed">#4dffffff</color>
+    <color name="button_border">#33ffffff</color>
+
+    <color name="hairline">#1fffffff</color>
+
+    <color name="warning">#ff8a80</color>
+
+    <!-- The fills lighten at night, so the label on them turns dark rather than white. -->
+    <color name="status_recording">#66bb6a</color>
+    <color name="status_paused">#ffb74d</color>
+    <color name="status_error">#ff8a80</color>
+    <color name="status_off">#26ffffff</color>
+    <color name="status_text">#1c1c1c</color>
+    <color name="status_text_off">#99ffffff</color>
+</resources>

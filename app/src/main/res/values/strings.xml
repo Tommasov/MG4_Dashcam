@@ -44,6 +44,12 @@
     <string name="storage_status_unavailable">No usable storage (USB: %1$s)</string>
 
     <!-- Recording status -->
+    <string name="status_pill_on">ON</string>
+    <string name="status_pill_off">OFF</string>
+    <string name="status_pill_paused">PAUSE</string>
+    <string name="status_pill_error">ERROR</string>
+    <string name="status_pill_starting">WAIT</string>
+
     <string name="settings_dashcam_status_off">Off</string>
     <string name="settings_dashcam_status_starting">Starting…</string>
     <string name="settings_dashcam_status_recording">Recording %1$d/%2$d cameras</string>

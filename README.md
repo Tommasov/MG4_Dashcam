@@ -187,6 +187,24 @@ are captured 1/50 s apart, weaving them combs every moving object, and keeping o
 choice. Recording with `RecordActivity` **while driving** and looking for combing in the
 1440x960 output settles it.
 
+## Graphic resources
+
+The switch track and thumb are taken from the vehicle's own system software, so that a toggle
+in this app is the toggle the driver already knows rather than a phone control dropped into a
+car. The palette and the type scale beside them are measured from the factory launcher, not
+copied from it: values, not artwork.
+
+Those images are **not licensed to this project**. They remain the property of SAIC/MG and
+their respective owners, and are included here only so that the app can match the system on a
+vehicle that already contains them. No ownership is claimed over them, and their presence
+implies no permission, endorsement or affiliation. Anyone who redistributes this project, or
+builds on it, does so under their own responsibility. The same applies to trademarks and brand
+names, used here descriptively only.
+
+Note that the GPL-3.0 licence covering this code says nothing about third-party assets sitting
+in the tree: the two coexist, and forking this repository does not place those images under the
+GPL.
+
 ## Relationship to upstream
 
 Upstream is GPL-3.0 and so is this, as required. The work that matters — the V4L2 device

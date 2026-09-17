@@ -1,9 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Carried over from MG4 Simple Launcher, which lifted it from the SAIC launcher, so that
+     the two apps and the vehicle read as one interface. Values, not artwork: nothing here is
+     copied from the head unit, only measured from it. -->
 <resources>
-    <color name="settings_surface">#1A1A1A</color>
-    <color name="settings_accent">#E7E7E7</color>
-    <color name="settings_text_primary">#FFFFFFFF</color>
-    <color name="settings_text_secondary">#C0C0C0</color>
-    <color name="settings_text_highlight">#B3E7E7E7</color>
-    <color name="settings_text_muted">#A0A0A0</color>
+    <color name="text_primary">#3c4143</color>
+    <color name="text_secondary">#7f3c4143</color>
+    <color name="text_tertiary">#503c4143</color>
+
+    <!-- SAIC blue: the accent on the factory launcher. -->
+    <color name="accent">#056eff</color>
+    <color name="accent_pressed">#0455cc</color>
+
+    <!-- The stock side dock is #f2f2f2 by day (SystemUI dockbar_bg_color). A full-screen panel
+         that sits on top of the system should not be whiter than the system. -->
+    <color name="surface">#f2f2f2</color>
+
+    <!-- Tonal surfaces, tints of the text colour rather than greys of their own. -->
+    <color name="button_surface">#1f3c4143</color>
+    <color name="button_surface_pressed">#3d3c4143</color>
+    <color name="button_border">#00000000</color>
+
+    <!-- The line under a row of readings: present enough to group, faint enough to ignore. -->
+    <color name="hairline">#14000000</color>
+
+    <!-- Destructive action: the one place this app raises its voice. -->
+    <color name="warning">#b3261e</color>
+
+    <!-- Status badge. Traffic-light semantics on purpose: green is not the camcorder
+         convention, but in a car the question being asked at a glance is "is it working",
+         and reserving red for trouble answers it without reading the word. -->
+    <color name="status_recording">#2e7d32</color>
+    <color name="status_paused">#b26a00</color>
+    <color name="status_error">#b3261e</color>
+    <color name="status_off">#1f3c4143</color>
+    <color name="status_text">#ffffff</color>
+    <color name="status_text_off">#7f3c4143</color>
 </resources>

@@ -13,6 +13,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -47,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
 
     private SwitchCompat swEnabled;
     private TextView tvStatus;
+    private TextView tvStatusDetail;
     private TextView tvStorageStatus;
     private RadioGroup rgStorageTarget;
     private EditText etRecordsPath;
@@ -93,6 +95,7 @@ public class MainActivity extends AppCompatActivity {
 
         swEnabled = findViewById(R.id.swEnabled);
         tvStatus = findViewById(R.id.tvStatus);
+        tvStatusDetail = findViewById(R.id.tvStatusDetail);
         tvStorageStatus = findViewById(R.id.tvStorageStatus);
         rgStorageTarget = findViewById(R.id.rgStorageTarget);
         etRecordsPath = findViewById(R.id.etRecordsPath);
@@ -350,10 +353,45 @@ public class MainActivity extends AppCompatActivity {
 
     // ---------- Status ----------
 
+    /**
+     * The badge answers one question from across the cabin: is it recording. The sentence
+     * beside it answers the follow-up for anyone who leans in. Green rather than the camcorder
+     * red, so that red can mean only that something is wrong.
+     */
     private void refreshStatus() {
         RecordingService.PersistedStatus s = RecordingService.readPersistedStatus(prefs());
-        tvStatus.setText(RecordingService.formatStatusText(
-                this, s.status, s.activeCameras, s.totalCameras, s.lastError));
+        // Off is what the badge already says; repeating it beside the badge is noise. Every
+        // other state has something to add.
+        tvStatusDetail.setText(RecordingService.STATUS_OFF.equals(s.status)
+                ? ""
+                : RecordingService.formatStatusText(
+                        this, s.status, s.activeCameras, s.totalCameras, s.lastError));
+
+        final int label;
+        final int fill;
+        int textColor = R.color.status_text;
+        if (RecordingService.STATUS_RECORDING.equals(s.status)) {
+            label = R.string.status_pill_on;
+            fill = R.color.status_recording;
+        } else if (RecordingService.STATUS_PAUSED_OEM.equals(s.status)) {
+            label = R.string.status_pill_paused;
+            fill = R.color.status_paused;
+        } else if (RecordingService.STATUS_STARTING.equals(s.status)) {
+            label = R.string.status_pill_starting;
+            fill = R.color.status_paused;
+        } else if (RecordingService.STATUS_ERROR.equals(s.status)
+                || RecordingService.STATUS_PARTIAL.equals(s.status)) {
+            label = R.string.status_pill_error;
+            fill = R.color.status_error;
+        } else {
+            label = R.string.status_pill_off;
+            fill = R.color.status_off;
+            textColor = R.color.status_text_off;
+        }
+        tvStatus.setText(label);
+        tvStatus.setTextColor(ContextCompat.getColor(this, textColor));
+        tvStatus.setBackgroundTintList(
+                ColorStateList.valueOf(ContextCompat.getColor(this, fill)));
     }
 
     /** {@link DashcamStorageManager#resolve} does real IO for the USB targets. */
