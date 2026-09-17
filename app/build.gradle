@@ -12,6 +12,23 @@ if (apiKeysFile.exists()) {
     apiKeysFile.withInputStream { apiKeys.load(it) }
 }
 
+// Where the OpenCV Android SDK is unpacked, read from local.properties (git-ignored, like
+// sdk.dir next to it):
+//
+//     opencv.dir=D:/Android/OpenCV-android-sdk
+//
+// Set it and the native library is built from src/main/cpp; leave it out and the prebuilt in
+// src/main/jniLibs is used instead. That is the difference between needing the NDK, CMake and a
+// quarter of a gigabyte of OpenCV, and needing none of them - so it stays a choice rather than a
+// requirement, and a fresh clone still builds.
+def localPropsFile = rootProject.file("local.properties")
+def localProps = new Properties()
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { localProps.load(it) }
+}
+def opencvDir = localProps.getProperty("opencv.dir", "").trim()
+def buildNativeFromSource = !opencvDir.isEmpty()
+
 android {
     // The JNI entry points in libcameraprobe.so are bound by name
     // (Java_com_drivehub_kamera_CameraProbe_*), so the namespace must stay put even though
@@ -27,13 +44,25 @@ android {
         applicationId "com.tommasov.mg4dashcam"
         minSdk 28
         targetSdk 36
-        versionCode 24
-        versionName "0.1.0-beta.13"
+        versionCode 25
+        versionName "0.1.0-beta.14"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters "arm64-v8a"
+        }
+
+        if (buildNativeFromSource) {
+            externalNativeBuild {
+                cmake {
+                    // The OpenCV SDK path is not hardcoded in CMakeLists.txt any more: it
+                    // differs on every machine, and upstream's copy still points at its author's
+                    // own home directory.
+                    arguments "-DOPENCV_ANDROID_SDK=" + opencvDir
+                    cppFlags "-std=c++17"
+                }
+            }
         }
 
         buildConfigField "String", "PROBE_URL",
@@ -61,9 +90,28 @@ android {
         targetCompatibility JavaVersion.VERSION_11
     }
 
-    // No externalNativeBuild: the native library is vendored as a prebuilt in
-    // src/main/jniLibs. See src/main/jniLibs/README.md for how to rebuild it from
-    // src/main/cpp instead.
+    if (buildNativeFromSource) {
+        // The NDK that built the vendored library, read out of its own .note.android.ident:
+        // r28c, build 13676358. Matching it is not strictly required, but it is the one
+        // combination with the OpenCV 4.9.0 SDK that is known to have produced a working
+        // library on this head unit.
+        ndkVersion "28.2.13676358"
+        externalNativeBuild {
+            cmake {
+                path "src/main/cpp/CMakeLists.txt"
+                version "3.22.1"
+            }
+        }
+        // Otherwise the freshly built library and the vendored one would both want to be
+        // lib/arm64-v8a/libcameraprobe.so in the APK.
+        sourceSets {
+            main {
+                jniLibs.srcDirs = []
+            }
+        }
+    }
+    // Without opencv.dir there is no externalNativeBuild at all: the native library is taken
+    // from the prebuilt in src/main/jniLibs. See src/main/jniLibs/README.md.
 }
 
 dependencies {

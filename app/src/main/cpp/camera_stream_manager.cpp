@@ -19,6 +19,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <exception>
 #include <cstdarg>
 #include <cstdint>
 #include <ctime>
@@ -1504,6 +1505,20 @@ namespace camera_stream_manager
                 }
                 stopRequested_.store(false);
                 running_.store(true);
+                if (worker_.joinable())
+                {
+                    // The previous loop can end on its own, and usually does: once the last
+                    // consumer is gone, cleanupStoppedConsumers() sets stopRequested_ from
+                    // inside the loop, threadLoop() breaks out and clears running_ - and
+                    // nothing joins worker_. That is exactly what happens every time the
+                    // cameras are handed to the factory 360 view.
+                    //
+                    // Move-assigning onto a joinable std::thread is std::terminate() by the
+                    // standard, so without this the process aborted the next time recording
+                    // started: SIGABRT, "terminating", on whichever thread asked to record.
+                    // The thread has already finished, so the join returns at once.
+                    worker_.join();
+                }
                 auto self = shared_from_this();
                 worker_ = std::thread([self]()
                                       { self->threadLoop(); });
@@ -1579,65 +1594,87 @@ namespace camera_stream_manager
 
             void threadLoop()
             {
-                while (running_.load())
+                // OpenCV is linked statically here and reports every failure by throwing:
+                // an unexpected frame size, a conversion code it does not know, a failed
+                // allocation. Nothing in this file used to catch any of it, so a bad frame from
+                // a camera the factory app was taking away did not end a capture - it called
+                // std::terminate and took the whole process with it.
+                //
+                // Ending this one camera's capture is the right size of failure. The cleanup
+                // below still runs, and ensureStartedLocked() can start it again afterwards.
+                try
                 {
-                    bool shouldExit = false;
+                    while (running_.load())
                     {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        shouldExit = stopRequested_.load() && !hasConsumersLocked();
-                    }
-                    if (shouldExit)
-                    {
-                        break;
-                    }
+                        bool shouldExit = false;
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            shouldExit = stopRequested_.load() && !hasConsumersLocked();
+                        }
+                        if (shouldExit)
+                        {
+                            break;
+                        }
 
-                    fd_set readSet;
-                    FD_ZERO(&readSet);
-                    FD_SET(fd_, &readSet);
-                    timeval timeout{0, PREVIEW_SELECT_TIMEOUT_US};
-                    const int ready = select(fd_ + 1, &readSet, nullptr, nullptr, &timeout);
-                    if (ready <= 0)
-                    {
+                        fd_set readSet;
+                        FD_ZERO(&readSet);
+                        FD_SET(fd_, &readSet);
+                        timeval timeout{0, PREVIEW_SELECT_TIMEOUT_US};
+                        const int ready = select(fd_ + 1, &readSet, nullptr, nullptr, &timeout);
+                        if (ready <= 0)
+                        {
+                            cleanupStoppedConsumers();
+                            continue;
+                        }
+
+                        v4l2_buffer buffer{};
+                        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                        buffer.memory = V4L2_MEMORY_MMAP;
+                        if (ioctl(fd_, VIDIOC_DQBUF, &buffer) < 0)
+                        {
+                            continue;
+                        }
+
+                        cv::Mat packedFrame(srcHeight_, srcWidth_, CV_8UC2, buffers_[buffer.index].start, srcStrideBytes_);
+                        cv::Mat packedCrop = packedFrame(cv::Rect(0, 0, cropWidth_, cropHeight_));
+
+                        const int conversionCode = rgbaConversionCode(packedFormat_);
+                        rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
+                        cv::cvtColor(packedCrop, rgbaScratch_, conversionCode);
+
+                        std::vector<std::shared_ptr<FrameConsumer>> consumers;
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            renderPreviewLocked(rgbaScratch_);
+                            consumers.reserve(consumers_.size());
+                            for (const auto &entry : consumers_)
+                            {
+                                consumers.push_back(entry.second);
+                            }
+                        }
+
+                        for (const auto &consumer : consumers)
+                        {
+                            if (consumer != nullptr)
+                            {
+                                consumer->processFrame(rgbaScratch_);
+                            }
+                        }
+
+                        ioctl(fd_, VIDIOC_QBUF, &buffer);
                         cleanupStoppedConsumers();
-                        continue;
                     }
 
-                    v4l2_buffer buffer{};
-                    buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-                    buffer.memory = V4L2_MEMORY_MMAP;
-                    if (ioctl(fd_, VIDIOC_DQBUF, &buffer) < 0)
-                    {
-                        continue;
-                    }
-
-                    cv::Mat packedFrame(srcHeight_, srcWidth_, CV_8UC2, buffers_[buffer.index].start, srcStrideBytes_);
-                    cv::Mat packedCrop = packedFrame(cv::Rect(0, 0, cropWidth_, cropHeight_));
-
-                    const int conversionCode = rgbaConversionCode(packedFormat_);
-                    rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
-                    cv::cvtColor(packedCrop, rgbaScratch_, conversionCode);
-
-                    std::vector<std::shared_ptr<FrameConsumer>> consumers;
-                    {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        renderPreviewLocked(rgbaScratch_);
-                        consumers.reserve(consumers_.size());
-                        for (const auto &entry : consumers_)
-                        {
-                            consumers.push_back(entry.second);
-                        }
-                    }
-
-                    for (const auto &consumer : consumers)
-                    {
-                        if (consumer != nullptr)
-                        {
-                            consumer->processFrame(rgbaScratch_);
-                        }
-                    }
-
-                    ioctl(fd_, VIDIOC_QBUF, &buffer);
-                    cleanupStoppedConsumers();
+                }
+                catch (const std::exception &e)
+                {
+                    loge("capture loop for /dev/video%d ended on an exception: %s",
+                         videoIndex_, e.what());
+                }
+                catch (...)
+                {
+                    loge("capture loop for /dev/video%d ended on an unknown exception",
+                         videoIndex_);
                 }
 
                 cleanupStoppedConsumers();
