@@ -28,6 +28,15 @@
     <string name="btn_eject_usb">Stop and eject USB</string>
     <string name="btn_storage_details">Show storage details</string>
     <string name="storage_details_working">Checking…</string>
+    <string name="section_oem">Factory 360 app</string>
+    <string name="section_oem_summary">These act on the factory around-view app (com.saicmotor.hmi.aroundview), not on the recordings made by this dashcam. Its hidden test screen leaves raw .nv12 stills and .h264 clips in its own folder and never removes them; both apps run as the same system user, so they can be read and cleared from here.</string>
+    <string name="btn_copy_oem_captures">Copy captures out of the 360 app</string>
+    <string name="oem_captures_working">Copying…</string>
+    <string name="btn_delete_oem_captures">Delete captures inside the 360 app</string>
+    <string name="oem_delete_title">Delete files inside the factory 360 app?</string>
+    <string name="oem_delete_message">This does not touch your dashcam recordings. It removes the .nv12 stills and .h264 clips left in the private folder of com.saicmotor.hmi.aroundview, the factory around-view app. Anything else in that folder is left alone. This cannot be undone.</string>
+    <string name="oem_delete_confirm">Delete</string>
+    <string name="oem_deleting">Deleting…</string>
 
     <string name="storage_status_checking">Checking storage…</string>
     <string name="storage_status_internal">Internal: %1$s (USB: %2$s)</string>

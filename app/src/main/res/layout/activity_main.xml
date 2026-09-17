@@ -209,6 +209,33 @@
             android:text="@string/btn_storage_details" />
 
         <TextView
+            style="@style/DashcamSectionHeader"
+            android:text="@string/section_oem" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/section_oem_summary"
+            android:textColor="@color/settings_text_secondary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btnCopyOemCaptures"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="52dp"
+            android:text="@string/btn_copy_oem_captures" />
+
+        <Button
+            android:id="@+id/btnDeleteOemCaptures"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="52dp"
+            android:text="@string/btn_delete_oem_captures" />
+
+        <TextView
             android:id="@+id/tvStorageDetails"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

@@ -3,6 +3,7 @@ package com.drivehub.kamera;
 import com.drivehub.kamera.dashcam.DashcamSettings;
 import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
+import com.drivehub.kamera.dev.OemCaptures;
 import com.drivehub.kamera.settings.UiPrefs;
 
 import android.Manifest;
@@ -24,6 +25,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
@@ -122,6 +124,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btnStorageDetails).setOnClickListener(v -> showStorageDetails());
+        findViewById(R.id.btnCopyOemCaptures).setOnClickListener(v -> copyOemCaptures());
+        findViewById(R.id.btnDeleteOemCaptures).setOnClickListener(v -> confirmDeleteOemCaptures());
 
         bind();
         ensureStoragePermission();
@@ -286,8 +290,61 @@ public class MainActivity extends AppCompatActivity {
             } catch (Throwable t) {
                 text = String.valueOf(t);
             }
-            final String finalText = text;
+            final String finalText = text + "\n\n== 360 app captures ==\n" + safeOemListing();
             mainHandler.post(() -> details.setText(finalText));
+        });
+    }
+
+    private static String safeOemListing() {
+        try {
+            return OemCaptures.describe();
+        } catch (Throwable t) {
+            return String.valueOf(t);
+        }
+    }
+
+    /**
+     * Lifts whatever the factory 360 app's RecordActivity left in its private directory into
+     * the dashcam records folder, where it can be read off the car. Both apps run as uid 1000,
+     * so this is an ordinary copy rather than a way around anything.
+     */
+    private void copyOemCaptures() {
+        TextView details = findViewById(R.id.tvStorageDetails);
+        details.setText(R.string.oem_captures_working);
+        ioExecutor.execute(() -> {
+            String result;
+            try {
+                result = OemCaptures.copyTo(DashcamSettings.getRecordsBaseDir(this));
+            } catch (Throwable t) {
+                result = String.valueOf(t);
+            }
+            final String finalResult = result + "\n\n" + safeOemListing();
+            mainHandler.post(() -> details.setText(finalResult));
+        });
+    }
+
+    /** Deleting another app's files deserves a question first, especially on a touch screen. */
+    private void confirmDeleteOemCaptures() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.oem_delete_title)
+                .setMessage(R.string.oem_delete_message)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.oem_delete_confirm, (d, which) -> deleteOemCaptures())
+                .show();
+    }
+
+    private void deleteOemCaptures() {
+        TextView details = findViewById(R.id.tvStorageDetails);
+        details.setText(R.string.oem_deleting);
+        ioExecutor.execute(() -> {
+            String result;
+            try {
+                result = OemCaptures.deleteCaptures();
+            } catch (Throwable t) {
+                result = String.valueOf(t);
+            }
+            final String finalResult = result + "\n\n" + safeOemListing();
+            mainHandler.post(() -> details.setText(finalResult));
         });
     }
 
