@@ -12,6 +12,18 @@ all. See [Relationship to upstream](#relationship-to-upstream).
 > the internal-storage target and the event save have had no real mileage yet. Treat every
 > release as a test build.
 
+<p align="center">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/screenshot-day.png" alt="The dashcam screen on the head unit, light theme" width="90%">
+</p>
+<p align="center">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/screenshot-night.png" alt="The same screen at night" width="90%">
+</p>
+
+<p align="center">
+  <em>One screen, sized for 1920x720 read at arm's length. The badge answers the only question
+  worth asking from the driver seat.</em>
+</p>
+
 ## What it does
 
 - Records front, rear, left and right into a single 1200x800 clip at 25 fps, in 30-second
