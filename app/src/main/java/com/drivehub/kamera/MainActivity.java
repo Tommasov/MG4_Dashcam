@@ -3,6 +3,7 @@ package com.drivehub.kamera;
 import com.drivehub.kamera.dashcam.DashcamSettings;
 import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
+import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.dev.OemCaptures;
 import com.drivehub.kamera.settings.UiPrefs;
 
@@ -293,7 +294,9 @@ public class MainActivity extends AppCompatActivity {
             } catch (Throwable t) {
                 text = String.valueOf(t);
             }
-            final String finalText = text + "\n\n== 360 app captures ==\n" + safeOemListing();
+            final String finalText = text
+                    + "\n\n== 360 app captures ==\n" + safeOemListing()
+                    + "\n\n== runtime log ==\n" + DevRuntimeLog.snapshot();
             mainHandler.post(() -> details.setText(finalText));
         });
     }

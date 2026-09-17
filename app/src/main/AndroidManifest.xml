@@ -32,9 +32,16 @@
         android:roundIcon="@mipmap/drivehub_kamera"
         android:supportsRtl="true"
         android:theme="@style/Theme.DrivehubKamera">
+        <!-- Automotive system library, present on the head unit. Optional so the app still
+             installs where it is not. Used only by VehicleGearProbe, through reflection. -->
+        <uses-library
+            android:name="android.car"
+            android:required="false" />
+
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="stateHidden|adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

@@ -5,10 +5,12 @@ import com.drivehub.kamera.R;
 import com.drivehub.kamera.CameraProbe;
 import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.helper.app.NotificationChannelHelper;
+import com.drivehub.kamera.helper.vehiclesensors.VehicleGearProbe;
 import com.drivehub.kamera.helper.vehiclesensors.VehicleSpeedReader;
 import com.drivehub.kamera.settings.UiPrefs;
 
 import android.app.Notification;
+import android.app.ActivityManager;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
@@ -74,6 +76,8 @@ public class RecordingService extends Service {
     private static final String ERROR_GRID_START_FAILED = "grid start failed";
     private static final String ERROR_GRID_STOP_TIMEOUT = "grid stop timeout";
     private static final String ERROR_USB_STORAGE = "usb storage unavailable";
+    private static final String ERROR_LOOP_DIED = "recording loop died";
+    private static final String ERROR_STALLED = "recording stalled";
 
     private static final String KEY_STATUS = "recordingStatus";
     private static final String KEY_ACTIVE_CAMERAS = "recordingActiveCameras";
@@ -92,6 +96,8 @@ public class RecordingService extends Service {
     private static final long ERROR_OVERLAY_DELAY_MS = 5_000L;
 
     private static volatile boolean sServiceRunning = false;
+    /** Same process as the receivers, so they can act without a service round trip. */
+    private static volatile RecordingService sInstance;
 
     private final Object eventLock = new Object();
     private final Object stateLock = new Object();
@@ -110,6 +116,11 @@ public class RecordingService extends Service {
     private volatile boolean usbEjectInProgress = false;
     private volatile boolean futureOnlyEventSession = false;
     private long completedSegmentCount = 0L;
+    private volatile long lastSegmentCompletedMs = 0L;
+    private static final long WATCHDOG_PERIOD_MS = 20_000L;
+    private static final long OEM_POLL_MS = 1_000L;
+    private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
+    private int awayPolls = 0;
 
     public static boolean isRunning() {
         return sServiceRunning;
@@ -157,14 +168,45 @@ public class RecordingService extends Service {
         context.startService(i);
     }
 
+    /**
+     * Yields the cameras as fast as this process can.
+     *
+     * The factory AVM calls V4l2_Init almost immediately after it launches, and loses if the
+     * devices are still held: the screen dims and no picture arrives. Going through
+     * startForegroundService first costs service creation and scheduling before a single flag
+     * is raised, which is time spent on the wrong side of that race. The receiver runs in this
+     * very process, so it raises the flags and interrupts the worker directly, and only then
+     * starts the service for the status, the notification and the banner.
+     */
     public static void pauseForOemRequest(Context context) {
         SharedPreferences prefs = UiPrefs.getPrefs(context);
         if (!prefs.getBoolean(DashcamSettings.KEY_ENABLED, false) || !isRunning()) {
             return;
         }
+        RecordingService service = sInstance;
+        if (service != null) {
+            service.beginOemPauseNow();
+        }
         Intent i = new Intent(context, RecordingService.class);
         i.setAction(ACTION_PAUSE_FOR_OEM_REQUEST);
         context.startForegroundService(i);
+    }
+
+    /** The whole of the release path, minus anything that touches the screen. */
+    void beginOemPauseNow() {
+        if (oemPauseRequested) {
+            return;
+        }
+        DevRuntimeLog.add("RecordingService", "oem pause: releasing cameras now");
+        oemPauseRequested = true;
+        segmentStopRequested = true;
+        synchronized (stateLock) {
+            stateLock.notifyAll();
+        }
+        Thread w = worker;
+        if (w != null) {
+            w.interrupt();
+        }
     }
 
     public static void resumeAfterOemRequest(Context context) {
@@ -181,6 +223,7 @@ public class RecordingService extends Service {
     public void onCreate() {
         super.onCreate();
         sServiceRunning = true;
+        sInstance = this;
         NotificationChannelHelper.ensureChannel(this, CHANNEL_ID, R.string.notification_channel_recording);
         restoreEventState();
     }
@@ -362,7 +405,31 @@ public class RecordingService extends Service {
         stopServiceIfNotEjecting();
     }
 
+    /**
+     * Wraps the loop so a thrown exception cannot kill the worker quietly.
+     *
+     * Without this the thread dies, `worker` is never cleared, the service stays alive and the
+     * persisted status stays RECORDING: the app shows a green badge over a dashcam that stopped
+     * recording. Seen once on a real drive. Failing loudly is the whole point.
+     */
     private void recordLoop() {
+        try {
+            recordLoopBody();
+        } catch (Throwable t) {
+            Log.e(TAG, "recording loop died", t);
+            DevRuntimeLog.add("RecordingService", "loop died: " + t);
+            worker = null;
+            publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_LOOP_DIED);
+            try {
+                CameraProbe.stopCombinedMp4Record();
+            } catch (Throwable ignored) {
+                // the encoder may already be gone; nothing useful to do here
+            }
+            stopServiceIfNotEjecting();
+        }
+    }
+
+    private void recordLoopBody() {
         // NOTE: For now we only record MP4 clips, not speed or turn-signal data.
         SharedPreferences prefs = prefs();
         boolean enabled = prefs.getBoolean(DashcamSettings.KEY_ENABLED, false);
@@ -383,6 +450,14 @@ public class RecordingService extends Service {
         }
 
         long segmentMs = segmentSec * 1000L;
+        // Asks once whether the standard car API can tell us the gear on this vehicle. Writes
+        // the answer to the runtime log and does nothing else; see VehicleGearProbe.
+        VehicleGearProbe.probe(this);
+        mainHandler.post(this::startWatchdog);
+        mainHandler.post(() -> {
+            mainHandler.removeCallbacks(oemForegroundWatch);
+            mainHandler.postDelayed(oemForegroundWatch, OEM_POLL_MS);
+        });
 
         boolean endedWithFatalError = false;
 
@@ -556,7 +631,97 @@ public class RecordingService extends Service {
         return true;
     }
 
+    /**
+     * Second detector, restored from upstream's SignalService.
+     *
+     * The broadcasts are the fast path but not a guarantee: a route into the factory camera we
+     * have not mapped, or a broadcast that arrives late, leaves the dashcam holding the
+     * devices while the AVM sits on screen showing nothing. Watching which app is actually in
+     * front catches every route, because it looks at the outcome instead of the signal. It is
+     * slower than a broadcast, so it is a net, not a replacement.
+     *
+     * It also covers the other half: if the AVM goes away without sending ACTION_STOP — a
+     * crash, a force-stop — nothing would otherwise resume recording.
+     */
+    private final Runnable oemForegroundWatch = new Runnable() {
+        @Override
+        public void run() {
+            if (worker == null || stopRequested) {
+                return;
+            }
+            if (UiPrefs.isOemAvmCoexistEnabled(prefs())) {
+                boolean front = isOemAvmInForeground();
+                if (front && !oemPauseRequested) {
+                    DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
+                    beginOemPauseNow();
+                    publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
+                    awayPolls = 0;
+                } else if (!front && oemPauseRequested) {
+                    // Two polls, so a moment of the launcher between screens is not a departure.
+                    if (++awayPolls >= 2) {
+                        DevRuntimeLog.add("RecordingService", "oem gone from foreground; resuming");
+                        awayPolls = 0;
+                        resumeAfterOemRequest(RecordingService.this);
+                    }
+                } else {
+                    awayPolls = 0;
+                }
+            }
+            mainHandler.postDelayed(this, OEM_POLL_MS);
+        }
+    };
+
+    /**
+     * getRunningTasks is restricted, but this app is the system user, which is the same reason
+     * it can open the camera devices at all.
+     */
+    private boolean isOemAvmInForeground() {
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return false;
+            List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(1);
+            if (tasks == null || tasks.isEmpty()) return false;
+            ActivityManager.RunningTaskInfo top = tasks.get(0);
+            return top.topActivity != null
+                    && OEM_AVM_PACKAGE.equals(top.topActivity.getPackageName());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * A green badge is a claim, and this is what checks it. The worker publishes RECORDING once
+     * and then only updates between segments, so a loop that stops producing them leaves the
+     * claim standing. If nothing completes for three segment lengths, say so.
+     */
+    private void startWatchdog() {
+        lastSegmentCompletedMs = System.currentTimeMillis();
+        mainHandler.removeCallbacks(watchdog);
+        mainHandler.removeCallbacks(oemForegroundWatch);
+        mainHandler.postDelayed(watchdog, WATCHDOG_PERIOD_MS);
+    }
+
+    private final Runnable watchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (worker == null || stopRequested) {
+                return;
+            }
+            long stale = System.currentTimeMillis() - lastSegmentCompletedMs;
+            long limit = 3L * Math.max(1, DashcamSettings.getSegmentDurationSec()) * 1000L;
+            if (!oemPauseRequested
+                    && STATUS_RECORDING.equals(prefs().getString(KEY_STATUS, STATUS_OFF))
+                    && stale > limit) {
+                DevRuntimeLog.add("RecordingService",
+                        "watchdog: no segment for " + (stale / 1000) + "s");
+                publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_STALLED);
+            }
+            mainHandler.postDelayed(this, WATCHDOG_PERIOD_MS);
+        }
+    };
+
     private void onSegmentCompleted(File baseDir, String baseName, long startMs, long endMs, int keepSegments) {
+        lastSegmentCompletedMs = System.currentTimeMillis();
         List<EventCopyJob> copyJobs;
         synchronized (eventLock) {
             long segmentOrdinal = ++completedSegmentCount;
@@ -1247,6 +1412,11 @@ public class RecordingService extends Service {
                     R.string.dashcam_recording_error_overlay_subtitle_stop_failed,
                     R.string.notification_dashcam_recording_error_stop_failed_text);
         }
+        if (ERROR_STALLED.equals(lastError) || ERROR_LOOP_DIED.equals(lastError)) {
+            return new OverlayMessageSpec(
+                    R.string.dashcam_recording_error_overlay_subtitle_stalled,
+                    R.string.notification_dashcam_recording_error_stalled_text);
+        }
         if (ERROR_USB_STORAGE.equals(lastError)) {
             return new OverlayMessageSpec(
                     R.string.dashcam_recording_error_overlay_subtitle_usb_unavailable,
@@ -1375,7 +1545,9 @@ public class RecordingService extends Service {
     @Override
     public void onDestroy() {
         sServiceRunning = false;
+        sInstance = null;
         stopRequested = true;
+        mainHandler.removeCallbacks(watchdog);
         cancelPendingErrorOverlay();
         eventCopyExecutor.shutdown();
         if (worker != null) {

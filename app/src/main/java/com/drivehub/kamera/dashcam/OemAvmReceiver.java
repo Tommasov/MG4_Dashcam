@@ -33,6 +33,10 @@ public class OemAvmReceiver extends BroadcastReceiver {
         SharedPreferences prefs = UiPrefs.getPrefs(context);
         boolean coexistEnabled = UiPrefs.isOemAvmCoexistEnabled(prefs);
         if (!coexistEnabled) {
+            // Logged before returning: otherwise "nothing in the log" means both "the broadcast
+            // never arrived" and "the setting is off", which are opposite problems.
+            DevRuntimeLog.add("OemAvmReceiver",
+                    "ignoring " + action + ": camera hand-off is switched off");
             return;
         }
         int startMessage = intent.getIntExtra(EXTRA_START_MESSAGE, Integer.MIN_VALUE);

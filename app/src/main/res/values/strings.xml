@@ -79,6 +79,8 @@
     <string name="dashcam_recording_error_overlay_subtitle_usb_unavailable">USB unavailable</string>
     <string name="dashcam_recording_error_overlay_subtitle_usb_fallback">Switched to internal storage</string>
     <string name="notification_dashcam_recording_error_text">The dashcam stopped recording.</string>
+    <string name="dashcam_recording_error_overlay_subtitle_stalled">Recording stalled</string>
+    <string name="notification_dashcam_recording_error_stalled_text">No clip has been written for a while. Turn the switch off and on again.</string>
     <string name="notification_dashcam_recording_error_storage_text">Cannot write to the recording folder.</string>
     <string name="notification_dashcam_recording_error_start_failed_text">The cameras could not be opened.</string>
     <string name="notification_dashcam_recording_error_stop_failed_text">The last clip could not be closed properly.</string>
