@@ -290,17 +290,21 @@ to be given on the command line.
 
 ### Why it is worth knowing about
 
-Those stills are the reference for what the cameras actually deliver: **720x480 per camera,
-progressive, no interlace combing**. This app records cells of 720x240, because the V4L2 buffer
-holds two 240-row halves stacked and the capture path keeps one of them.
+Those stills are 720x480 per camera, and they are what sent us looking at the capture format -
+which turned out to be the most useful thing in this repository.
 
-That costs vertical resolution, not field of view - a 720x240 cell stretched back to 720x480 is
-a complete, correctly proportioned fisheye, matching the factory still. Raising the crop to 480
-would not help, since it would yield the same picture twice; the two halves would have to be
-interleaved. Whether that is worth doing depends on something still untested: if the two halves
-are captured 1/50 s apart, weaving them combs every moving object, and keeping one is the right
-choice. Recording with `RecordActivity` **while driving** and looking for combing in the
-1440x960 output settles it.
+Each camera hands over a **720x480 interlaced** frame. This app records cells of 720x240, because
+the capture path keeps one field and discards the other. That costs vertical resolution, not
+field of view: a 720x240 cell stretched back to 720x480 is a complete, correctly proportioned
+fisheye. But the missing scan lines are not gone - they are in the same buffer, in rows 240-479,
+and interleaving the two halves recovers **127% more vertical detail**, measured.
+
+The driver reports `field=V4L2_FIELD_NONE`, a progressive frame. It is wrong. And the factory
+stills are not evidence to the contrary: the factory app runs the frames through the MediaTek
+hardware de-interlacer first - `libv4l2utils.so` exports `v4l2_OpenMtkDI`.
+
+The evidence, the method for reproducing it, and what to do about it are in
+[docs/camera-format.md](docs/camera-format.md).
 
 ## Diagnostics
 
