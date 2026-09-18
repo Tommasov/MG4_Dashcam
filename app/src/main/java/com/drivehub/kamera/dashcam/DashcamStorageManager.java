@@ -46,6 +46,8 @@ public final class DashcamStorageManager {
     public static final String KEY_STORAGE_TARGET = "dashcamStorageTarget";
     private static final String KEY_USB_RETENTION_CLIP_COUNT = "dashcamUsbRetentionClipCount";
     private static final String KEY_USB_MAX_RETAINED_EVENT_DIRS = "dashcamUsbMaxRetainedEventDirs";
+    /** Empty means "whichever is there", which is right until a second volume shows up. */
+    private static final String KEY_USB_VOLUME_ID = "dashcamUsbVolumeId";
 
     // USB media are larger and tolerate write load better, so defaults are much more generous
     // than the conservative internal defaults (10 clips / 5 events).
@@ -66,7 +68,8 @@ public final class DashcamStorageManager {
         NO_MEDIUM,          // no removable volume mounted under /storage
         NOT_WRITABLE,       // volume(s) found but the dashcam dir cannot be created/written
         WRITE_TEST_FAILED,  // dir exists but the actual write probe failed
-        MULTIPLE_MEDIA      // more than one usable medium — refusing to pick one silently
+        MULTIPLE_MEDIA,     // more than one usable medium and no choice made — see setPreferredVolumeId
+        CHOSEN_VOLUME_ABSENT // a volume was chosen by hand and it is not connected
     }
 
     /** Immutable outcome of one storage resolution pass. */
@@ -137,6 +140,59 @@ public final class DashcamStorageManager {
         return usingUsb
                 ? getUsbMaxRetainedEventDirs(prefs)
                 : DashcamSettings.getMaxRetainedEventDirs(prefs);
+    }
+
+    // ---------- Which volume ----------
+
+    /**
+     * The volume the driver picked, or empty for "whichever is there".
+     *
+     * <p>Stored as the volume's uuid - the FAT serial, the {@code 9EFB-89C8} that also names the
+     * raw vold mount. It survives unplugging, rebooting and being moved between the two ports.
+     * It does not survive reformatting, which is why a chosen volume that is not present says so
+     * rather than quietly recording somewhere else.
+     */
+    @NonNull
+    public static String getPreferredVolumeId(SharedPreferences prefs) {
+        return prefs.getString(KEY_USB_VOLUME_ID, "");
+    }
+
+    public static void setPreferredVolumeId(SharedPreferences prefs, @NonNull String volumeId) {
+        prefs.edit().putString(KEY_USB_VOLUME_ID, volumeId).apply();
+    }
+
+    /** One connected volume, as the picker needs to describe it. */
+    public static final class VolumeChoice {
+        public final String volumeId;
+        public final String description;
+        public final long freeBytes;
+        public final long totalBytes;
+
+        VolumeChoice(String volumeId, String description, long freeBytes, long totalBytes) {
+            this.volumeId = volumeId;
+            this.description = description;
+            this.freeBytes = freeBytes;
+            this.totalBytes = totalBytes;
+        }
+    }
+
+    /** Every removable volume currently connected. Touches the filesystem - not on the main thread. */
+    @NonNull
+    public static List<VolumeChoice> listVolumes(Context context) {
+        List<UsbCandidate> candidates = findUsbCandidates(context);
+        if (candidates.isEmpty()) {
+            candidates = findLegacyStorageCandidates();
+        }
+        List<VolumeChoice> out = new ArrayList<>();
+        for (UsbCandidate candidate : candidates) {
+            out.add(new VolumeChoice(
+                    candidate.volumeId,
+                    candidate.description == null || candidate.description.isEmpty()
+                            ? candidate.rootDir.getName() : candidate.description,
+                    candidate.rootDir.getFreeSpace(),
+                    candidate.rootDir.getTotalSpace()));
+        }
+        return out;
     }
 
     // ---------- What is on the medium ----------
@@ -439,6 +495,24 @@ public final class DashcamStorageManager {
         }
         if (candidates.isEmpty()) {
             return new UsbProbe(UsbState.NO_MEDIUM, null);
+        }
+        String preferred = getPreferredVolumeId(UiPrefs.getPrefs(context));
+        if (!preferred.isEmpty()) {
+            List<UsbCandidate> chosen = new ArrayList<>();
+            for (UsbCandidate candidate : candidates) {
+                if (preferred.equals(candidate.volumeId)) {
+                    chosen.add(candidate);
+                }
+            }
+            if (chosen.isEmpty()) {
+                // Deliberately not falling back to the other volume. Somebody said "this stick",
+                // and writing a drive's footage to the wrong medium because the right one was
+                // left at home is worse than saying so.
+                trace(trace, "chosen volume " + preferred + " is not connected");
+                return new UsbProbe(UsbState.CHOSEN_VOLUME_ABSENT, null);
+            }
+            trace(trace, "chosen volume " + preferred + " is connected; ignoring the others");
+            candidates = chosen;
         }
         List<UsbCandidate> prioritized = prioritizeUsbCandidates(candidates);
         List<File> usable = new ArrayList<>();

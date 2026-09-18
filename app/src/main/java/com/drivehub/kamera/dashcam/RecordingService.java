@@ -707,7 +707,7 @@ public class RecordingService extends Service {
                 720,
                 240,
                 recordingFps,
-                9_000_000,
+                DashcamSettings.getRecordingBitrateBps(prefs),
                 signature,
                 showSpeed,
                 cameraMask);

@@ -16,6 +16,8 @@
     <string name="label_retention_usb">Spezzoni da tenere sulla USB</string>
     <string name="label_max_event_dirs">Eventi salvati da tenere</string>
     <string name="label_fps">Fotogrammi al secondo</string>
+    <string name="label_bitrate">Bitrate del video (kbit/s)</string>
+    <string name="label_bitrate_summary">9000 è il valore predefinito, e costa circa 58 MB al minuto. Abbassalo se sulla stessa chiavetta tieni anche la musica: è la dashcam che scrive forte a far saltare la riproduzione.</string>
     <string name="label_signature">Firma nella fascia inferiore</string>
     <string name="label_show_speed">Mostra la velocità nella fascia inferiore</string>
     <string name="label_oem_coexist">Cedi le telecamere alla vista 360/retromarcia di serie</string>
@@ -75,6 +77,15 @@
     <string name="oem_delete_confirm">Cancella</string>
     <string name="oem_deleting">Cancellazione in corso…</string>
 
+    <string name="usb_volume_button">Memoria USB: %1$s</string>
+    <string name="usb_volume_any">quella che trova</string>
+    <string name="usb_volume_title">Quale memoria USB deve usare la dashcam?</string>
+    <string name="usb_volume_message">Scegline una se ne tieni collegata più d\'una — una chiavetta per la dashcam e un\'altra per la musica, per dire. Senza una scelta la dashcam usa quella che trova, e se ne trova due si rifiuta di indovinare.</string>
+    <string name="usb_volume_entry_any">Quella che trova</string>
+    <string name="usb_volume_entry">%1$s — %2$s liberi su %3$s</string>
+    <string name="usb_volume_entry_absent">%1$s — non collegata</string>
+    <string name="usb_volume_none">Non c\'è nessuna memoria USB collegata.</string>
+    <string name="storage_status_chosen_absent">La memoria USB scelta non è collegata</string>
     <string name="storage_status_checking">Controllo dell\'archiviazione…</string>
     <string name="storage_status_internal">Interna: %1$s (USB: %2$s)</string>
     <string name="storage_status_usb">USB: %1$s</string>

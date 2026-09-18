@@ -16,6 +16,8 @@
     <string name="label_retention_usb">Clips kept on USB</string>
     <string name="label_max_event_dirs">Saved events kept</string>
     <string name="label_fps">Frames per second</string>
+    <string name="label_bitrate">Video bitrate (kbit/s)</string>
+    <string name="label_bitrate_summary">9000 is the default, and costs about 58 MB a minute. Lower it if the same USB stick also plays music: the dashcam writing hard is what makes the music stutter.</string>
     <string name="label_signature">Footer signature</string>
     <string name="label_show_speed">Show speed in the footer</string>
     <string name="label_oem_coexist">Yield the cameras to the factory 360/reverse view</string>
@@ -74,6 +76,15 @@
     <string name="oem_delete_confirm">Delete</string>
     <string name="oem_deleting">Deleting…</string>
 
+    <string name="usb_volume_button">USB memory: %1$s</string>
+    <string name="usb_volume_any">whichever is connected</string>
+    <string name="usb_volume_title">Which USB memory should the dashcam use?</string>
+    <string name="usb_volume_message">Pick one when you keep more than one connected - a stick for the dashcam and another for music, say. With no choice made, the dashcam uses whichever it finds, and refuses to guess when it finds two.</string>
+    <string name="usb_volume_entry_any">Whichever is connected</string>
+    <string name="usb_volume_entry">%1$s — %2$s free of %3$s</string>
+    <string name="usb_volume_entry_absent">%1$s — not connected</string>
+    <string name="usb_volume_none">No USB memory is connected.</string>
+    <string name="storage_status_chosen_absent">The chosen USB memory is not connected</string>
     <string name="storage_status_checking">Checking storage…</string>
     <string name="storage_status_internal">Internal: %1$s (USB: %2$s)</string>
     <string name="storage_status_usb">USB: %1$s</string>

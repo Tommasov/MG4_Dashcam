@@ -119,6 +119,13 @@
                         android:text="@string/storage_target_usb" />
                 </RadioGroup>
 
+                <Button
+                    android:id="@+id/btnUsbVolume"
+                    style="@style/TonalButton"
+                    android:layout_width="match_parent"
+                    android:gravity="start|center_vertical"
+                    android:textAlignment="viewStart" />
+
                 <TextView
                     android:id="@+id/tvStorageStatus"
                     style="@style/Hint"
@@ -258,6 +265,22 @@
                     style="@style/FieldShort"
                     android:autofillHints=""
                     android:inputType="number" />
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:text="@string/label_bitrate" />
+
+                <EditText
+                    android:id="@+id/etBitrate"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:layout_marginTop="4dp"
+                    android:maxWidth="@dimen/text_measure_max"
+                    android:text="@string/label_bitrate_summary" />
 
                 <TextView
                     style="@style/FieldLabel"
