@@ -144,3 +144,15 @@ Java_com_drivehub_kamera_CameraProbe_updateCombinedRecordingSpeed(JNIEnv* /*env*
         return true;
     });
 }
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_drivehub_kamera_CameraProbe_describeCameraFormats(JNIEnv* env, jclass /*clazz*/) {
+    std::string text;
+    try {
+        text = camera_stream_manager::describeFormats();
+    } catch (...) {
+        text = "unavailable";
+    }
+    return env->NewStringUTF(text.c_str());
+}

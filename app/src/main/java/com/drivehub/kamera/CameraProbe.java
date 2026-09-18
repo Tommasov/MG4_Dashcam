@@ -18,6 +18,16 @@ public final class CameraProbe {
     public static native void detachPreview(int videoIndex);
 
     /**
+     * What each camera device reported the last time it was opened: pixel format, size, stride
+     * and field order.
+     *
+     * <p>The field order is the one that matters. The capture path keeps the top half of every
+     * frame; whether the other half is a duplicate or the missing scan lines decides whether the
+     * recording is at half the vertical resolution it could be.
+     */
+    public static native String describeCameraFormats();
+
+    /**
      * Detaches all preview consumers managed by the native camera stream manager.
      */
     public static native void detachAllPreviews();

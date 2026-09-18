@@ -25,6 +25,7 @@
 #include <ctime>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -87,6 +88,47 @@ namespace camera_stream_manager
             va_start(args, fmt);
             logPrint(ANDROID_LOG_ERROR, fmt, args);
             va_end(args);
+        }
+
+        /**
+         * Names the V4L2 field order, which is the one thing that says how the buffer is laid out.
+         *
+         * <p>The capture path takes the top half of every frame and has always treated the rest as
+         * a second copy: full field of view at half the vertical resolution. If that is right the
+         * driver is reporting SEQ_TB or SEQ_BT - two fields stacked - and the other half is the
+         * missing scan lines rather than a duplicate, which would mean the full 720x480 is there
+         * for the weaving. The factory app saves progressive 720x480 stills from these same
+         * cameras, so something can get at it.
+         *
+         * <p>Nobody was reading this field, and nothing logged the format at all. Whatever the
+         * answer is, it should not take another guess to find out.
+         */
+        const char *fieldName(__u32 field)
+        {
+            switch (field)
+            {
+            case V4L2_FIELD_ANY: return "ANY";
+            case V4L2_FIELD_NONE: return "NONE (progressive)";
+            case V4L2_FIELD_TOP: return "TOP";
+            case V4L2_FIELD_BOTTOM: return "BOTTOM";
+            case V4L2_FIELD_INTERLACED: return "INTERLACED (woven)";
+            case V4L2_FIELD_SEQ_TB: return "SEQ_TB (two fields stacked, top first)";
+            case V4L2_FIELD_SEQ_BT: return "SEQ_BT (two fields stacked, bottom first)";
+            case V4L2_FIELD_ALTERNATE: return "ALTERNATE (one field per buffer)";
+            case V4L2_FIELD_INTERLACED_TB: return "INTERLACED_TB";
+            case V4L2_FIELD_INTERLACED_BT: return "INTERLACED_BT";
+            default: return "unknown";
+            }
+        }
+
+        /** One line per device, replaced when a device is reopened. See describeFormats(). */
+        std::mutex gFormatMutex;
+        std::map<int, std::string> gFormats;
+
+        void rememberFormat(int videoIndex, const std::string &line)
+        {
+            std::lock_guard<std::mutex> lock(gFormatMutex);
+            gFormats[videoIndex] = line;
         }
 
         std::string errnoStr()
@@ -1436,6 +1478,19 @@ namespace camera_stream_manager
                 cropWidth_ = srcWidth_;
                 cropHeight_ = srcHeight_ / 2;
 
+                {
+                    char line[256];
+                    snprintf(line, sizeof(line),
+                             "/dev/video%d: %s %ux%u stride=%u size=%u field=%u %s -> using %dx%d",
+                             videoIndex_, fourccToString(pixelFormat_).c_str(),
+                             format.fmt.pix.width, format.fmt.pix.height,
+                             format.fmt.pix.bytesperline, format.fmt.pix.sizeimage,
+                             format.fmt.pix.field, fieldName(format.fmt.pix.field),
+                             cropWidth_, cropHeight_);
+                    logi("%s", line);
+                    rememberFormat(videoIndex_, line);
+                }
+
                 v4l2_requestbuffers request{};
                 request.count = 4;
                 request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -2024,6 +2079,22 @@ namespace camera_stream_manager
 
         const bool sinkStopped = sink->waitUntilStopped(STOP_WAIT_MS);
         return allConsumersStopped && sinkStopped;
+    }
+
+    std::string describeFormats()
+    {
+        std::lock_guard<std::mutex> lock(gFormatMutex);
+        if (gFormats.empty())
+        {
+            return "no camera has been opened yet";
+        }
+        std::string out;
+        for (const auto &entry : gFormats)
+        {
+            out += entry.second;
+            out += "\n";
+        }
+        return out;
     }
 
     void updateCombinedRecordingSpeed(int speedKmh)

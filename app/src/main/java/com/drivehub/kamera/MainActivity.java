@@ -586,6 +586,8 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable t) {
             sb.append("storage probe failed: ").append(t).append("\n");
         }
+        sb.append("\n").append("== what the cameras report ==").append("\n")
+                .append(safeCameraFormats());
         sb.append("\n").append("== 360 app captures ==").append("\n")
                 .append(safeOemListing());
         sb.append("\n").append("== what android recorded about our deaths ==").append("\n")
@@ -593,6 +595,20 @@ public class MainActivity extends AppCompatActivity {
         sb.append("\n").append("== runtime log ==").append("\n")
                 .append(DevRuntimeLog.snapshot()).append("\n");
         return sb.toString();
+    }
+
+    /**
+     * What the V4L2 devices say about themselves, if any has been opened this run.
+     *
+     * <p>Empty until recording has started at least once: the format is read when a device is
+     * opened, and nothing opens one just to ask. Worth saying so rather than printing nothing.
+     */
+    private String safeCameraFormats() {
+        try {
+            return CameraProbe.describeCameraFormats();
+        } catch (Throwable t) {
+            return "unavailable: " + t;
+        }
     }
 
     // ---------- Status ----------

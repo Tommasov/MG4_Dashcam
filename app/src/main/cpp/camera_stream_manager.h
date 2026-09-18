@@ -19,4 +19,13 @@ bool startCombinedRecording(JNIEnv* env, const std::string& outputPath,
 bool stopCombinedRecording();
 void updateCombinedRecordingSpeed(int speedKmh);
 
+/**
+ * What each camera device reported the last time it was opened: pixel format, size, stride and
+ * field order.
+ *
+ * <p>There is no adb on this head unit, so anything the native side learns and only writes to
+ * logcat is learned in private. This hands it back for the diagnostics report.
+ */
+std::string describeFormats();
+
 } // namespace camera_stream_manager
