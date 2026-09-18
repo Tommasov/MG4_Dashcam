@@ -567,10 +567,13 @@ public class RecordingService extends Service {
             return;
         }
 
-        File baseDir = resolveActiveBaseDir(true);
+        File baseDir = awaitRecordsBaseDir();
         if (baseDir == null) {
             worker = null;
-            stopSelf();
+            // Deliberately not stopSelf(). Stopping takes the supervisor with it, and then only
+            // the driver noticing a red badge and toggling the switch could ever start recording
+            // again. Staying alive costs a retry every twenty seconds and heals by itself when
+            // the stick is finally ready - or when one is plugged in.
             return;
         }
 
@@ -1349,9 +1352,65 @@ public class RecordingService extends Service {
      * @param initial true on the first resolution of a recording session — suppresses
      *                the USB↔internal transition banner that only makes sense mid-session.
      */
+    /** Backoff for the wait below: about half a minute in all, most of it in the first seconds. */
+    private static final long[] STORAGE_WAIT_MS = {0L, 1_000L, 2_000L, 4_000L, 8_000L, 15_000L};
+
+    /**
+     * The records directory, waiting for it rather than giving up the first time it is not there.
+     *
+     * <p>At boot the head unit is still mounting the USB stick while this service is already
+     * starting - the report from the car caught Android running a filesystem check on it in the
+     * same minute. The write test fails for a few seconds and then starts passing.
+     *
+     * <p>That was treated as fatal: the service stopped, taking the supervisor with it, and
+     * nothing recorded for the rest of the drive unless the driver happened to look at the badge
+     * and work out that the switch needed turning off and on again. The first failure is not an
+     * answer, it is a "not yet".
+     */
+    private File awaitRecordsBaseDir() {
+        for (int attempt = 0; attempt < STORAGE_WAIT_MS.length; attempt++) {
+            if (stopRequested || !prefs().getBoolean(DashcamSettings.KEY_ENABLED, false)) {
+                return null;
+            }
+            long wait = STORAGE_WAIT_MS[attempt];
+            if (wait > 0) {
+                synchronized (stateLock) {
+                    try {
+                        stateLock.wait(wait);
+                    } catch (InterruptedException ignored) {
+                        // Interrupted means somebody wants us to stop or to hand the cameras
+                        // over; either way the loop above re-reads the state and decides.
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+                Thread.interrupted();
+            }
+            boolean lastTry = attempt == STORAGE_WAIT_MS.length - 1;
+            File dir = resolveActiveBaseDir(true, lastTry);
+            if (dir != null) {
+                if (attempt > 0) {
+                    DevRuntimeLog.add("RecordingService",
+                            "storage ready on attempt " + (attempt + 1));
+                }
+                return dir;
+            }
+        }
+        return null;
+    }
+
     private File resolveActiveBaseDir(boolean initial) {
+        return resolveActiveBaseDir(initial, true);
+    }
+
+    private File resolveActiveBaseDir(boolean initial, boolean announceFailure) {
         DashcamStorageManager.Resolution res = DashcamStorageManager.resolve(this);
         if (res.baseDir == null) {
+            if (!announceFailure) {
+                // A retry is still in hand; saying "error" now would only make the badge flicker
+                // red and back while the volume finishes mounting.
+                return null;
+            }
             DevRuntimeLog.add("RecordingService", "Storage resolve failed: " + res.usbState);
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_USB_STORAGE);
             return null;

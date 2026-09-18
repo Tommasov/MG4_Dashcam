@@ -273,14 +273,34 @@ public final class DashcamStorageManager {
      * app. The raw mount comes first because it puts the clips where a person plugging the stick
      * into a computer will actually look.
      */
-    private static List<File> recordsDirCandidates(UsbCandidate candidate) {
-        List<File> dirs = new ArrayList<>();
-        if (!candidate.volumeId.isEmpty()) {
-            dirs.add(new File(new File(MEDIA_RW_ROOT, candidate.volumeId), USB_RECORDS_DIR_NAME));
+    /**
+     * One place to try, and what kind of place it is.
+     *
+     * <p>The kind is carried through to the trace because a bare path misleads. The report from
+     * the car listed three failed attempts and the last one - the app sandbox, with the package
+     * name in it - was read as "this is where it is recording", when in fact nothing had been
+     * written anywhere. The path that catches the eye is the one that needs explaining.
+     */
+    private static final class Where {
+        final File dir;
+        final String what;
+
+        Where(File dir, String what) {
+            this.dir = dir;
+            this.what = what;
         }
-        dirs.add(new File(candidate.rootDir, USB_RECORDS_DIR_NAME));
+    }
+
+    private static List<Where> recordsDirCandidates(UsbCandidate candidate) {
+        List<Where> dirs = new ArrayList<>();
+        if (!candidate.volumeId.isEmpty()) {
+            dirs.add(new Where(new File(new File(MEDIA_RW_ROOT, candidate.volumeId), USB_RECORDS_DIR_NAME),
+                    "raw vold mount"));
+        }
+        dirs.add(new Where(new File(candidate.rootDir, USB_RECORDS_DIR_NAME), "volume root"));
         if (candidate.appPrivateDir != null) {
-            dirs.add(new File(candidate.appPrivateDir, USB_RECORDS_DIR_NAME));
+            dirs.add(new Where(new File(candidate.appPrivateDir, USB_RECORDS_DIR_NAME),
+                    "app sandbox - last resort, a computer will not find the clips there"));
         }
         return dirs;
     }
@@ -318,29 +338,33 @@ public final class DashcamStorageManager {
         boolean anyWriteTestFailed = false;
         for (UsbCandidate candidate : prioritized) {
             File accepted = null;
-            for (File recordsDir : recordsDirCandidates(candidate)) {
+            String acceptedWhat = "";
+            for (Where where : recordsDirCandidates(candidate)) {
+                File recordsDir = where.dir;
                 File parent = recordsDir.getParentFile();
                 boolean existed = recordsDir.isDirectory();
                 if (!existed && !recordsDir.mkdirs() && !recordsDir.isDirectory()) {
                     // Upstream skipped silently here, which makes a NOT_WRITABLE result
                     // impossible to tell apart from a missing medium in a log.
                     trace(trace, "no: cannot create " + recordsDir.getAbsolutePath()
-                            + " (parent " + describeFile(parent) + ")");
+                            + " [" + where.what + "] (parent " + describeFile(parent) + ")");
                     continue;
                 }
                 if (!recordsDir.canWrite()) {
                     trace(trace, "no: not writable " + recordsDir.getAbsolutePath()
-                            + " (existed=" + existed + " " + describeFile(recordsDir) + ")");
+                            + " [" + where.what + "] (existed=" + existed + " "
+                            + describeFile(recordsDir) + ")");
                     continue;
                 }
                 String probeError = writeProbeError(recordsDir);
                 if (probeError != null) {
                     anyWriteTestFailed = true;
                     trace(trace, "no: write probe failed in " + recordsDir.getAbsolutePath()
-                            + ": " + probeError);
+                            + " [" + where.what + "]: " + probeError);
                     continue;
                 }
                 accepted = recordsDir;
+                acceptedWhat = where.what;
                 break;
             }
             if (accepted == null) {
@@ -348,7 +372,8 @@ public final class DashcamStorageManager {
                         + " (no writable location)");
                 continue;
             }
-            trace(trace, "accepted: " + accepted.getAbsolutePath());
+            trace(trace, "accepted: " + accepted.getAbsolutePath()
+                    + " [" + acceptedWhat + "]");
             usable.add(accepted);
         }
         if (usable.size() == 1) {
