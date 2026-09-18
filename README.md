@@ -62,6 +62,65 @@ all. See [Relationship to upstream](#relationship-to-upstream).
 What it deliberately does **not** do: tile view, turn-signal overlay, digital rearview mirror,
 floating banners, in-app updates. Those are upstream's, and upstream is where they belong.
 
+## What a recording looks like
+
+<p align="center">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame.png" alt="One recorded frame: front and rear stacked in the middle, the side cameras rotated down each edge, a footer with the date, time and speed" width="90%">
+</p>
+
+<p align="center">
+  <em>One frame as 1.0.0 records it.</em>
+</p>
+
+Two things about that frame are wrong, and both come from a layout that was inherited rather
+than designed. Upstream's app shows one camera at a time, full screen on a 1920x720 head unit,
+so its cell is 720x240 - near enough the shape of the screen. The grid was assembled out of
+those cells afterwards.
+
+The canvas height is decided by the **side** cameras: they are 720 wide at the source, so they
+are 720 tall once rotated. The centre column stacks two 240-row cells and reaches 480, leaving
+120 rows of black above and below. **Eighteen per cent of every frame is black**, and it costs
+the same bitrate as picture does.
+
+The cells are also the wrong shape. The camera buffer holds two stacked 240-row fields rather
+than one 480-row image; the app keeps a single field, which is the whole field of view at half
+the vertical resolution. A 720x240 cell should therefore be shown as 720x480 - and it is not, so
+the fisheye circles come out as ellipses: **front and rear squashed vertically by 2x, and the
+sides squashed horizontally by the same amount** once they have been rotated. Look at the left
+and right strips above and you are looking at exactly that: a usable view, compressed into
+something you cannot read.
+
+It matters more here than it would elsewhere. Wrong proportions make distance and speed hard to
+judge, in footage somebody may one day have to read carefully.
+
+### What the next major version will look like
+
+<p align="center">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="Mock-up of the planned layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions" width="90%">
+</p>
+
+<p align="center">
+  <em>A mock-up, made by taking the frame above apart and putting it back together the new way.</em>
+</p>
+
+A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no black. Front and
+rear sit side by side on top, which is the pair you want together when you are working out who
+came from where; left and right go below, each on the side it belongs to.
+
+Three smaller decisions came with it:
+
+- **The rear view stops being mirrored.** Upstream flips it horizontally to match what a driver
+  expects from a mirror, which is right when you are reversing and wrong in an archive: it
+  reverses every number plate behind you.
+- **The upscale is bilinear**, not lanczos. Doubling the height of a cell cannot recover detail
+  that was never captured, so a sharper filter only invents edges - and the encoder then pays
+  for them. Measured on real footage at equal quality: lanczos costs 61 per cent more bitrate
+  than the current frame, bicubic 57, bilinear 41.
+- **The bitrate stays at 9 Mbit/s.** Quality per pixel drops, but today almost a fifth of those
+  bits go on black and the side views are unreadable anyway. Spending the same budget on picture
+  is the better trade, and it keeps the write rate - and the USB stick - where it is.
+
+
 ## Installing
 
 The app declares `android:sharedUserId="android.uid.system"`. That is what lets it open the
