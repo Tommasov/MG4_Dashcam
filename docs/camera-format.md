@@ -68,6 +68,16 @@ This is the one that settles it. In a genuine interlaced pair the fields mesh, a
 is uniform across every boundary. Had one half been a copy of the other, the two figures would
 alternate between roughly zero and a full step. They do not differ at all.
 
+<p align="center">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/interlace-comparison.png" alt="The same crop twice: on the left both fields woven into 720x480, on the right one field with its lines doubled. The woven version resolves the diagonal edge smoothly; the doubled one shows a staircase." width="100%">
+</p>
+
+<p align="center">
+  <em>The same 150x105 crop from one buffer, magnified 6x without smoothing and brightened -
+  a night capture, which is the unfavourable case. Left: both fields woven. Right: one field
+  with its lines doubled, which is what this app recorded. The diagonal is the tell.</em>
+</p>
+
 **The gain is real.** Vertical detail energy, woven against line-doubled:
 
 ```
@@ -118,20 +128,28 @@ been there all along.
 This is identical in R63 and R71: same 343 exported symbols, same strings, same line numbers —
 only the build-server path baked into the error messages differs.
 
-## What to do with it
+## What this app does about it
 
-Three options, in ascending order of both effort and quality.
+Since **1.1.0-beta.8** the capture path weaves the fields back together, motion-adaptively, in
+`deinterlaceLocked`.
 
-**Keep one field and upscale.** What the app does today. Correct field of view, half the vertical
-resolution, no artefacts. Honest and cheap.
+The even lines are the top field and are taken as they are: they were captured, they are real.
+Every odd line has two candidates — the bottom-field line captured at that position, and the
+average of the top-field lines above and below it. Which is right depends on whether anything
+moved in the 1/50 s between the fields, so the choice is made per pixel: if the captured line
+disagrees with *both* of its neighbours in the same direction, that is what a combed edge looks
+like and what a vertical detail does not, and the interpolation is used instead.
 
-**Weave, motion-adaptively.** Per pixel: where the two fields agree, interleave them and take the
-real detail; where they differ beyond a threshold, interpolate within one field and take today's
-sharpness without combing. A comparison per pixel, and no new hardware plumbing. This is the
-sweet spot, and the reason a plain weave is not: on a dashcam everything moves, and a plain weave
-serrates every moving edge.
+The interpolation is exactly the picture this app produced before, so the worst case of the whole
+change is the old behaviour, on the pixels that would have combed.
 
-**Use the MTK de-interlacer.** What the factory app does, and the best result — motion-adaptive
-in hardware, at no CPU cost. It means implementing the full V4L2 mem2mem path with ION buffers.
+It is deliberately not a plain weave. On a dashcam everything moves, and weaving a moving scene
+serrates every edge because the two halves are showing different moments.
 
-Whichever is chosen, the vertical resolution is not lost. It is being thrown away.
+## What would be better
+
+The MTK de-interlacer — what the factory app does. Motion-adaptive in hardware, at no CPU cost,
+and better than a comb detector working from one frame. It means implementing the full V4L2
+mem2mem path with ION buffers, which is why it is not what happened first.
+
+Either way, the vertical resolution was never lost. It was being thrown away.
