@@ -7,11 +7,15 @@ This is a stripped fork of [jamakr4/MG4-360-Camera-App](https://github.com/jamak
 whose author did the hard part: finding out how to get frames out of this vehicle's cameras at
 all. See [Relationship to upstream](#relationship-to-upstream).
 
-> **Status: early, but on the road.** Confirmed on the vehicle: it records the loop to a USB
-> stick at a measured 25 fps with no dropped frames; it hands the cameras to the factory 360
-> view for reverse, the steering-wheel button and the indicator, and picks recording back up on
-> its own afterwards. Not yet proven over long drives, and the internal-storage target and the
-> event save have had little real mileage. Treat every release as a test build.
+> **Status: it works, on one car.** A full commute on 18 September 2026 produced 27 minutes of
+> continuous recording: 51 consecutive clips, no crash, no dropped service, and every file
+> closed properly by the muxer. Two hand-offs to the factory 360 view happened during that run
+> — one on the move, one while parking — and recording picked itself back up both times.
+>
+> That car is the author's. Nobody else's MG4 has run this, and the internal-storage target and
+> the event save still have little real mileage. Two known limits: the app refuses to choose
+> when **two** USB volumes are connected, and sharing one stick with music playback can make
+> the music stutter — both are being worked on.
 
 <p align="center">
   <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/screenshot-day.png" alt="The dashcam screen on the head unit, light theme" width="90%">
