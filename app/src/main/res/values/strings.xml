@@ -1,5 +1,7 @@
 <resources>
-    <string name="app_name">MG4 Dashcam</string>
+    <!-- The launcher label and the heading on the screen. Neither needs to say MG4: the app
+         only runs on one. Not translated - it is a name. -->
+    <string name="app_name">Dashcam</string>
 
     <!-- Main screen -->
     <string name="section_recording">Recording</string>
