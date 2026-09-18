@@ -124,10 +124,28 @@
                     style="@style/Hint"
                     android:layout_marginTop="4dp" />
 
-                <Button
-                    android:id="@+id/btnEjectUsb"
-                    style="@style/TonalButton"
-                    android:text="@string/btn_eject_usb" />
+                <TextView
+                    android:id="@+id/tvStorageUsage"
+                    style="@style/Hint"
+                    android:layout_marginTop="4dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnEjectUsb"
+                        style="@style/TonalButtonCell"
+                        android:layout_marginEnd="@dimen/button_gap"
+                        android:text="@string/btn_eject_usb" />
+
+                    <Button
+                        android:id="@+id/btnClearRecords"
+                        style="@style/TonalButtonCell"
+                        android:textColor="@color/warning"
+                        android:text="@string/btn_clear_records" />
+                </LinearLayout>
 
                 <TextView
                     style="@style/FieldLabel"
@@ -352,6 +370,15 @@
                 style="@style/TonalButtonCell"
                 android:text="@string/btn_test_clip" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/row_gap"
+            android:gravity="end"
+            android:textColor="@color/text_tertiary"
+            android:textSize="@dimen/secondary_text_size" />
 
         <TextView
             android:id="@+id/tvStorageDetails"

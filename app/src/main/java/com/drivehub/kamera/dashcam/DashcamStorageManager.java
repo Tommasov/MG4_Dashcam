@@ -2,6 +2,8 @@ package com.drivehub.kamera.dashcam;
 
 import com.drivehub.kamera.settings.UiPrefs;
 
+import androidx.annotation.NonNull;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
@@ -51,6 +53,8 @@ public final class DashcamStorageManager {
     public static final int DEFAULT_USB_MAX_RETAINED_EVENT_DIRS = 25;
 
     private static final String USB_RECORDS_DIR_NAME = "dashcam";
+    private static final String EVENTS_DIR_NAME = "events";
+    private static final String CLIP_SUFFIX = ".mp4";
     private static final String WRITE_PROBE_FILE_NAME = ".dashcam_write_probe";
     private static final File LEGACY_STORAGE_ROOT = new File("/storage");
     /** Where vold mounts removable media before the per-app FUSE view is layered on. */
@@ -133,6 +137,109 @@ public final class DashcamStorageManager {
         return usingUsb
                 ? getUsbMaxRetainedEventDirs(prefs)
                 : DashcamSettings.getMaxRetainedEventDirs(prefs);
+    }
+
+    // ---------- What is on the medium ----------
+
+    /**
+     * What the dashcam is holding, told apart by what it means rather than by where it sits.
+     *
+     * <p>Loop clips are disposable by design - the ring buffer deletes them itself. Saved events
+     * are the opposite: somebody pressed something to keep those. Any number the app shows, and
+     * anything it offers to delete, has to keep the two apart, or the one button that frees space
+     * becomes the one button that throws away the reason you were recording.
+     */
+    public static final class Usage {
+        public final int clipCount;
+        public final long clipBytes;
+        public final int eventCount;
+        public final long eventBytes;
+
+        Usage(int clipCount, long clipBytes, int eventCount, long eventBytes) {
+            this.clipCount = clipCount;
+            this.clipBytes = clipBytes;
+            this.eventCount = eventCount;
+            this.eventBytes = eventBytes;
+        }
+
+        public long totalBytes() {
+            return clipBytes + eventBytes;
+        }
+
+        public boolean isEmpty() {
+            return clipCount == 0 && eventCount == 0;
+        }
+    }
+
+    /** Walks the records folder. Touches the filesystem - do not call on the main thread. */
+    @NonNull
+    public static Usage measureUsage(Context context) {
+        File base = resolve(context).baseDir;
+        if (base == null || !base.isDirectory()) {
+            return new Usage(0, 0L, 0, 0L);
+        }
+        int clipCount = 0;
+        long clipBytes = 0L;
+        File[] entries = base.listFiles();
+        if (entries != null) {
+            for (File entry : entries) {
+                if (entry.isFile() && entry.getName().endsWith(CLIP_SUFFIX)) {
+                    clipCount++;
+                    clipBytes += entry.length();
+                }
+            }
+        }
+        int eventCount = 0;
+        long eventBytes = 0L;
+        File events = new File(base, EVENTS_DIR_NAME);
+        File[] eventDirs = events.listFiles();
+        if (eventDirs != null) {
+            for (File dir : eventDirs) {
+                if (!dir.isDirectory()) {
+                    continue;
+                }
+                eventCount++;
+                eventBytes += sizeOfDirectory(dir);
+            }
+        }
+        return new Usage(clipCount, clipBytes, eventCount, eventBytes);
+    }
+
+    /**
+     * Deletes the loop clips and nothing else. Returns how many went.
+     *
+     * <p>Only files that sit directly in the records folder and end in the clip suffix: the
+     * events folder is a directory and is never descended into, so it cannot be caught by
+     * accident. Do not call on the main thread.
+     */
+    public static int deleteLoopClips(Context context) {
+        File base = resolve(context).baseDir;
+        if (base == null || !base.isDirectory()) {
+            return 0;
+        }
+        File[] entries = base.listFiles();
+        if (entries == null) {
+            return 0;
+        }
+        int deleted = 0;
+        for (File entry : entries) {
+            if (entry.isFile() && entry.getName().endsWith(CLIP_SUFFIX) && entry.delete()) {
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    private static long sizeOfDirectory(File dir) {
+        long total = 0L;
+        File[] entries = dir.listFiles();
+        if (entries == null) {
+            return 0L;
+        }
+        for (File entry : entries) {
+            total += entry.isDirectory() ? sizeOfDirectory(entry) : entry.length();
+        }
+        return total;
     }
 
     // ---------- Resolution ----------

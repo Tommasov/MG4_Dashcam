@@ -37,6 +37,32 @@
     <string name="probe_sending">Invio in corso…</string>
     <string name="probe_sent">Mandato: %1$s</string>
     <string name="probe_failed">Non mandato: %1$s</string>
+    <string name="btn_clear_records">Svuota le registrazioni in loop</string>
+    <string name="clear_records_title">Cancellare le registrazioni in loop?</string>
+    <string name="clear_records_message">Rimuove i %1$s di spezzoni da 30 secondi nella cartella di registrazione. Gli eventi salvati non si toccano: restano nella cartella degli eventi, che è il motivo per cui li hai salvati. Non si può annullare.</string>
+    <string name="clear_records_confirm">Cancella</string>
+    <string name="clear_records_none">Niente da cancellare: non ci sono registrazioni in loop.</string>
+    <string name="clear_records_working">Cancellazione in corso…</string>
+    <string name="clear_records_done">Cancellati %1$s, liberati %2$s</string>
+    <string name="storage_usage_checking">Misurazione…</string>
+    <!-- Counted things need their singular. "1 eventi salvati" is the kind of detail that
+         makes an app feel unfinished. -->
+    <plurals name="usage_clips">
+        <item quantity="one">%d spezzone</item>
+        <item quantity="other">%d spezzoni</item>
+    </plurals>
+    <plurals name="usage_events">
+        <item quantity="one">%d evento salvato</item>
+        <item quantity="other">%d eventi salvati</item>
+    </plurals>
+    <plurals name="cleared_clips">
+        <item quantity="one">%d spezzone</item>
+        <item quantity="other">%d spezzoni</item>
+    </plurals>
+    <string name="storage_usage">Occupa %1$s: %2$s, più %3$s</string>
+    <string name="storage_usage_no_events">Occupa %1$s: %2$s</string>
+    <string name="storage_usage_empty">Non c\'è ancora niente di registrato</string>
+    <string name="version_line">%1$s (%2$d)</string>
     <string name="storage_details_working">Controllo in corso…</string>
 
     <string name="section_oem">App 360 di fabbrica</string>

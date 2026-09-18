@@ -22,6 +22,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.format.Formatter;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
@@ -136,6 +137,12 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btnStorageDetails).setOnClickListener(v -> showStorageDetails());
+        findViewById(R.id.btnClearRecords).setOnClickListener(v -> confirmClearRecords());
+
+        // Which build this is, small and out of the way. It costs a corner of the screen and
+        // saves the first question of every report: "which version were you running?"
+        ((TextView) findViewById(R.id.tvVersion)).setText(getString(
+                R.string.version_line, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE));
 
         // Offered only when this build carries a probe key; a button that can only fail is
         // worse than no button.
@@ -167,6 +174,7 @@ public class MainActivity extends AppCompatActivity {
         RecordingService.resetPersistedStatusIfStale(prefs());
         refreshStatus();
         refreshStorageStatus();
+        refreshStorageUsage();
     }
 
     /**
@@ -327,6 +335,105 @@ public class MainActivity extends AppCompatActivity {
      * mount accepts them, and other firmware will differ again. When that goes wrong the only
      * useful answer is what the probe actually saw, and the head unit has no adb to ask.
      */
+    /**
+     * How much the dashcam is holding, measured rather than guessed.
+     *
+     * <p>Walks the folder on the io thread: on a stick with a hundred clips this is a directory
+     * listing, but it is a directory listing on a FAT volume that is also being written to, and
+     * the main thread has no business waiting for it.
+     */
+    private void refreshStorageUsage() {
+        TextView usage = findViewById(R.id.tvStorageUsage);
+        usage.setText(R.string.storage_usage_checking);
+        ioExecutor.execute(() -> {
+            final DashcamStorageManager.Usage measured;
+            try {
+                measured = DashcamStorageManager.measureUsage(this);
+            } catch (Throwable t) {
+                mainHandler.post(() -> usage.setText(""));
+                return;
+            }
+            mainHandler.post(() -> {
+                if (measured.isEmpty()) {
+                    usage.setText(R.string.storage_usage_empty);
+                } else if (measured.eventCount > 0) {
+                    usage.setText(getString(R.string.storage_usage,
+                            formatSize(measured.totalBytes()),
+                            quantity(R.plurals.usage_clips, measured.clipCount),
+                            quantity(R.plurals.usage_events, measured.eventCount)));
+                } else {
+                    usage.setText(getString(R.string.storage_usage_no_events,
+                            formatSize(measured.totalBytes()),
+                            quantity(R.plurals.usage_clips, measured.clipCount)));
+                }
+            });
+        });
+    }
+
+    private String quantity(int pluralResId, int count) {
+        return getResources().getQuantityString(pluralResId, count, count);
+    }
+
+    private String formatSize(long bytes) {
+        return Formatter.formatShortFileSize(this, bytes);
+    }
+
+    /**
+     * Emptying the loop is a question, not a button.
+     *
+     * <p>The clips are disposable and the ring buffer deletes them anyway; the saved events are
+     * the opposite, and they are the reason somebody was recording in the first place. So the
+     * question says how much is going, and says out loud that the events are staying.
+     */
+    private void confirmClearRecords() {
+        TextView usage = findViewById(R.id.tvStorageUsage);
+        usage.setText(R.string.storage_usage_checking);
+        ioExecutor.execute(() -> {
+            final DashcamStorageManager.Usage measured;
+            try {
+                measured = DashcamStorageManager.measureUsage(this);
+            } catch (Throwable t) {
+                mainHandler.post(this::refreshStorageUsage);
+                return;
+            }
+            mainHandler.post(() -> {
+                if (measured.clipCount == 0) {
+                    usage.setText(R.string.clear_records_none);
+                    return;
+                }
+                refreshStorageUsage();
+                Dialogs.builder(this)
+                        .setTitle(R.string.clear_records_title)
+                        .setMessage(getString(R.string.clear_records_message,
+                                formatSize(measured.clipBytes)))
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.clear_records_confirm,
+                                (d, w) -> clearRecords(measured.clipBytes))
+                        .show();
+            });
+        });
+    }
+
+    private void clearRecords(long expectedBytes) {
+        TextView usage = findViewById(R.id.tvStorageUsage);
+        usage.setText(R.string.clear_records_working);
+        ioExecutor.execute(() -> {
+            final int deleted;
+            try {
+                deleted = DashcamStorageManager.deleteLoopClips(this);
+            } catch (Throwable t) {
+                mainHandler.post(this::refreshStorageUsage);
+                return;
+            }
+            mainHandler.post(() -> {
+                Toast.makeText(this, getString(R.string.clear_records_done,
+                        quantity(R.plurals.cleared_clips, deleted),
+                        formatSize(expectedBytes)), Toast.LENGTH_LONG).show();
+                refreshStorageUsage();
+            });
+        });
+    }
+
     private void showStorageDetails() {
         TextView details = findViewById(R.id.tvStorageDetails);
         details.setText(R.string.storage_details_working);
