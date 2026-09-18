@@ -107,6 +107,14 @@ public class RecordingService extends Service {
     private static final String CHANNEL_ID = "mg4_recording";
     private static final int NOTIF_ID = 42;
     private static final int TOTAL_CAMERAS = 4;
+    /**
+     * The size of one camera's cell in the composed grid.
+     *
+     * <p>Public because the preview composes with the same numbers: a preview built on different
+     * ones would be a picture of a layout nobody records.
+     */
+    public static final int CELL_WIDTH = 720;
+    public static final int CELL_HEIGHT = 240;
     private static final int EVENT_SEGMENTS_BEFORE_CURRENT = 2;
     private static final int EVENT_SEGMENTS_AFTER_CURRENT = 2;
     private static final int FUTURE_ONLY_EVENT_SEGMENTS = 3;
@@ -704,8 +712,8 @@ public class RecordingService extends Service {
         File outputFile = new File(baseDir, baseName + ".mp4");
         boolean started = CameraProbe.startCombinedMp4Record(
                 outputFile.getAbsolutePath(),
-                720,
-                240,
+                CELL_WIDTH,
+                CELL_HEIGHT,
                 recordingFps,
                 DashcamSettings.getRecordingBitrateBps(prefs),
                 signature,

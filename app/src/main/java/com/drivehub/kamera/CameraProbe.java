@@ -28,6 +28,23 @@ public final class CameraProbe {
     public static native String describeCameraFormats();
 
     /**
+     * Shows the composed grid live on a Surface - the same canvas that recording writes.
+     *
+     * <p>If a recording is running the preview rides on its composer, so what appears is the very
+     * frame going into the file. If not, a composer is started with no encoder behind it.
+     */
+    public static native boolean attachCombinedPreview(android.view.Surface surface,
+            int cellWidth, int cellHeight, int fps, String signature, boolean showSpeed,
+            int cameraMask);
+
+    public static native boolean detachCombinedPreview();
+
+    /** The composed canvas size, so the preview can be given its shape instead of a stretch. */
+    public static native int previewCanvasWidth(int cellWidth, int cellHeight);
+
+    public static native int previewCanvasHeight(int cellWidth, int cellHeight);
+
+    /**
      * Detaches all preview consumers managed by the native camera stream manager.
      */
     public static native void detachAllPreviews();

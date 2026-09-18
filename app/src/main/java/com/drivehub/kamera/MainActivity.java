@@ -143,6 +143,8 @@ public class MainActivity extends AppCompatActivity {
             RecordingService.requestUsbEject(this);
         });
 
+        findViewById(R.id.btnPreviewGrid).setOnClickListener(
+                v -> startActivity(new Intent(this, PreviewActivity.class)));
         findViewById(R.id.btnUsbVolume).setOnClickListener(v -> chooseUsbVolume());
         findViewById(R.id.btnStorageDetails).setOnClickListener(v -> showStorageDetails());
         findViewById(R.id.btnClearRecords).setOnClickListener(v -> confirmClearRecords());

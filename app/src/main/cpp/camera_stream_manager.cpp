@@ -651,6 +651,25 @@ namespace camera_stream_manager
             std::shared_ptr<RecordingSink> sink_;
         };
 
+        /** The strip under the grid carrying the date, the time and the speed. */
+        static constexpr int COMBINED_FOOTER_HEIGHT = 80;
+
+        /**
+         * The size of the composed canvas, in one place.
+         *
+         * <p>The sink builds its buffers from this and the preview sizes its window from it, so a
+         * change to the layout cannot leave one of them believing the old shape.
+         */
+        int combinedCanvasWidth(int cellWidth, int cellHeight)
+        {
+            return cellWidth + (cellHeight * 2);
+        }
+
+        int combinedCanvasHeight(int cellWidth, int /*cellHeight*/)
+        {
+            return cellWidth + COMBINED_FOOTER_HEIGHT;
+        }
+
         class CombinedRecordingSink : public std::enable_shared_from_this<CombinedRecordingSink>
         {
         public:
@@ -661,10 +680,10 @@ namespace camera_stream_manager
                   cellHeight_(cellHeight),
                   sideWidth_(cellHeight),
                   sideHeight_(cellWidth),
-                  gridWidth_(cellWidth + (cellHeight * 2)),
+                  gridWidth_(combinedCanvasWidth(cellWidth, cellHeight)),
                   gridHeight_(cellWidth),
-                  footerHeight_(80),
-                  totalHeight_(gridHeight_ + footerHeight_),
+                  footerHeight_(COMBINED_FOOTER_HEIGHT),
+                  totalHeight_(combinedCanvasHeight(cellWidth, cellHeight)),
                   centerStackTop_((gridHeight_ - (cellHeight * 2)) / 2),
                   fps_(fps),
                   bitrate_(bitrate),
@@ -676,6 +695,101 @@ namespace camera_stream_manager
             ~CombinedRecordingSink()
             {
                 finalize();
+                if (previewWindow_ != nullptr)
+                {
+                    ANativeWindow_release(previewWindow_);
+                    previewWindow_ = nullptr;
+                }
+            }
+
+            /**
+             * Whether this sink writes a file, as opposed to only composing for the preview.
+             *
+             * <p>An empty output path means somebody wants to look at the grid without recording
+             * it. Everything up to the encoder is the same work, which is the point: what the
+             * preview shows is what the file would contain, composed by the same code rather
+             * than by an approximation of it.
+             */
+            bool isRecording() const
+            {
+                return !outputPath_.empty();
+            }
+
+            /**
+             * Shows the composed canvas on a Surface, live.
+             *
+             * <p>Takes the encoder lock because the canvas is written under it, and a preview
+             * window that changed mid-compose would be read after being released.
+             */
+            void setPreviewWindow(ANativeWindow *window)
+            {
+                std::lock_guard<std::mutex> lock(encoderMutex_);
+                if (previewWindow_ != nullptr)
+                {
+                    ANativeWindow_release(previewWindow_);
+                }
+                previewWindow_ = window;
+                if (previewWindow_ != nullptr)
+                {
+                    ANativeWindow_setBuffersGeometry(previewWindow_, gridWidth_, totalHeight_,
+                                                     AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
+                    // Same pre-warm as the single-camera preview: the first locks would
+                    // otherwise block while the buffer pool is allocated, and they would block
+                    // on the capture thread.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        ANativeWindow_Buffer warm{};
+                        if (ANativeWindow_lock(previewWindow_, &warm, nullptr) == 0)
+                        {
+                            if (warm.bits != nullptr && warm.height > 0 && warm.stride > 0)
+                            {
+                                std::memset(warm.bits, 0,
+                                            static_cast<size_t>(warm.stride) *
+                                                static_cast<size_t>(warm.height) * 4U);
+                            }
+                            ANativeWindow_unlockAndPost(previewWindow_);
+                        }
+                    }
+                }
+            }
+
+            /** Hands the window over without releasing it: the next composer will own it. */
+            ANativeWindow *takePreviewWindow()
+            {
+                std::lock_guard<std::mutex> lock(encoderMutex_);
+                ANativeWindow *window = previewWindow_;
+                previewWindow_ = nullptr;
+                return window;
+            }
+
+            bool hasPreviewWindow()
+            {
+                std::lock_guard<std::mutex> lock(encoderMutex_);
+                return previewWindow_ != nullptr;
+            }
+
+            void postCanvasToPreviewLocked()
+            {
+                if (previewWindow_ == nullptr || rgbaCanvas_.empty())
+                {
+                    return;
+                }
+                ANativeWindow_Buffer out{};
+                if (ANativeWindow_lock(previewWindow_, &out, nullptr) != 0)
+                {
+                    return;
+                }
+                const int rows = std::min(rgbaCanvas_.rows, out.height);
+                const int cols = std::min(rgbaCanvas_.cols, out.width);
+                const int srcStride = static_cast<int>(rgbaCanvas_.step[0]);
+                const int dstStride = out.stride * 4;
+                uint8_t *dst = static_cast<uint8_t *>(out.bits);
+                for (int row = 0; row < rows; row++)
+                {
+                    std::memcpy(dst + row * dstStride, rgbaCanvas_.data + row * srcStride,
+                                static_cast<size_t>(cols) * 4U);
+                }
+                ANativeWindow_unlockAndPost(previewWindow_);
             }
 
             bool initialize()
@@ -684,6 +798,22 @@ namespace camera_stream_manager
                 {
                     loge("combined invalid cell size %dx%d", cellWidth_, cellHeight_);
                     return false;
+                }
+
+                if (!isRecording())
+                {
+                    // Preview only: no codec, no muxer, no file. Just the canvas to draw on.
+                    rgbaCanvas_.create(totalHeight_, gridWidth_, CV_8UC4);
+                    rgbaCanvas_.setTo(cv::Scalar(0, 0, 0, 255));
+                    for (cv::Mat &frame : latestFrames_)
+                    {
+                        frame.create(cellHeight_, cellWidth_, CV_8UC4);
+                        frame.setTo(cv::Scalar(0, 0, 0, 255));
+                    }
+                    startUs_ = nowUs();
+                    nextPtsUs_ = 0;
+                    logi("combined preview %dx%d", gridWidth_, totalHeight_);
+                    return true;
                 }
 
                 if (!initializeCodec())
@@ -785,6 +915,14 @@ namespace camera_stream_manager
                 }
 
                 composeCanvasLocked();
+                postCanvasToPreviewLocked();
+                if (!isRecording())
+                {
+                    // Nothing downstream of the canvas. The pts gate above still paces us, so a
+                    // preview costs the same composition as a recording and nothing more.
+                    nextPtsUs_ += frameDurationUs_;
+                    return;
+                }
                 cv::cvtColor(rgbaCanvas_, i420Frame_, cv::COLOR_RGBA2YUV_I420);
                 if (encoderColorFormat_ == COLOR_FORMAT_YUV420_SEMIPLANAR)
                 {
@@ -1131,6 +1269,8 @@ namespace camera_stream_manager
 
             std::mutex encoderMutex_;
             cv::Mat rgbaCanvas_;
+            /** Where the composed canvas is also shown, when somebody is looking. */
+            ANativeWindow *previewWindow_ = nullptr;
             cv::Mat i420Frame_;
             std::array<cv::Mat, 4> latestFrames_{};
             cv::Mat leftRotated_;
@@ -1965,36 +2105,17 @@ namespace camera_stream_manager
         return true;
     }
 
-    bool startCombinedRecording(JNIEnv * /*env*/, const std::string &outputPath,
-                                int cellWidth, int cellHeight, int fps, int bitrate,
-                                const std::string &signature, bool showSpeed, int cameraMask)
+    namespace
     {
-        std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
-        std::shared_ptr<CombinedRecordingSink> sink;
-        if (gCombinedRecordingActive)
-        {
-            logw("combined recording already active");
-            return false;
-        }
-        int normalizedMask = cameraMask & COMBINED_CAMERA_MASK_ALL;
-        if (normalizedMask == 0)
-        {
-            normalizedMask = COMBINED_CAMERA_MASK_ALL;
-        }
 
-        sink = std::make_shared<CombinedRecordingSink>(
-            outputPath,
-            cellWidth,
-            cellHeight,
-            fps,
-            bitrate,
-            signature,
-            showSpeed);
-        if (!sink->initialize())
-        {
-            return false;
-        }
-
+    /**
+     * Wires a composed sink to the cameras it needs, or to none of them if any refuses.
+     *
+     * <p>Shared by recording and preview: the two differ only in whether the sink has an encoder
+     * behind it, and nothing about the attaching changes. Caller holds gCombinedMutex.
+     */
+    bool attachCombinedSinkLocked(const std::shared_ptr<CombinedRecordingSink> &sink, int normalizedMask)
+    {
         std::vector<std::pair<int, std::shared_ptr<CameraSession>>> attached;
         std::vector<int> attachedConsumerIds;
         for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
@@ -2021,7 +2142,88 @@ namespace camera_stream_manager
             attached.emplace_back(videoIndex, session);
             attachedConsumerIds.push_back(consumerId);
         }
+        return true;
+    }
 
+    /** Detaches whatever the combined sink was using. Caller must not hold gCombinedMutex. */
+    bool detachCombinedSessions()
+    {
+        bool allStopped = true;
+        for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
+        {
+            const int videoIndex = COMBINED_VIDEO_INDICES[i];
+            auto session = getSession(videoIndex);
+            if (session == nullptr)
+            {
+                continue;
+            }
+            if (!session->stopConsumer(COMBINED_CONSUMER_ID_BASE + static_cast<int>(i)))
+            {
+                allStopped = false;
+            }
+            eraseSessionIfIdle(videoIndex, session);
+        }
+        return allStopped;
+    }
+
+    } // namespace
+
+    bool startCombinedRecording(JNIEnv * /*env*/, const std::string &outputPath,
+                                int cellWidth, int cellHeight, int fps, int bitrate,
+                                const std::string &signature, bool showSpeed, int cameraMask)
+    {
+        std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
+        std::shared_ptr<CombinedRecordingSink> sink;
+        if (gCombinedRecordingActive)
+        {
+            logw("combined recording already active");
+            return false;
+        }
+
+        // A preview-only composer may be holding the cameras. It has to go before a recording
+        // one can have them, but its window does not: it is handed over below so the picture on
+        // screen carries on, now coming from the frames that are being written to the file.
+        ANativeWindow *previewWindow = nullptr;
+        if (gCombinedSink != nullptr)
+        {
+            auto previewSink = gCombinedSink;
+            gCombinedSink.reset();
+            previewWindow = previewSink->takePreviewWindow();
+            previewSink->requestStop();
+            detachCombinedSessions();
+            previewSink->waitUntilStopped(STOP_WAIT_MS);
+        }
+
+        int normalizedMask = cameraMask & COMBINED_CAMERA_MASK_ALL;
+        if (normalizedMask == 0)
+        {
+            normalizedMask = COMBINED_CAMERA_MASK_ALL;
+        }
+
+        sink = std::make_shared<CombinedRecordingSink>(
+            outputPath,
+            cellWidth,
+            cellHeight,
+            fps,
+            bitrate,
+            signature,
+            showSpeed);
+        if (!sink->initialize())
+        {
+            return false;
+        }
+
+        if (!attachCombinedSinkLocked(sink, normalizedMask))
+        {
+            return false;
+        }
+
+        // A preview that was running on its own composer hands its window to the recording one,
+        // so starting to record does not blank the screen somebody is watching.
+        if (previewWindow != nullptr)
+        {
+            sink->setPreviewWindow(previewWindow);
+        }
         gCombinedSink = sink;
         gCombinedRecordingActive = true;
         logi("combined recording attached with camera mask 0x%x", normalizedMask);
@@ -2044,6 +2246,93 @@ namespace camera_stream_manager
         }
         eraseSessionIfIdle(videoIndex, session);
         return stopped;
+    }
+
+    /**
+     * Shows the composed grid on a Surface, exactly as it would be recorded.
+     *
+     * <p>If a recording is running the preview rides on its composer, so what appears is the very
+     * frame being written to the file - not a second rendering that might differ from it. If not,
+     * a composer is started with no encoder behind it: the same work up to the canvas, and
+     * nothing after.
+     */
+    bool attachCombinedPreview(JNIEnv *env, jobject surface, int cellWidth, int cellHeight,
+                               int fps, const std::string &signature, bool showSpeed,
+                               int cameraMask)
+    {
+        if (surface == nullptr)
+        {
+            return false;
+        }
+        ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
+        if (window == nullptr)
+        {
+            logw("combined preview: ANativeWindow_fromSurface failed");
+            return false;
+        }
+
+        std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
+        if (gCombinedSink != nullptr)
+        {
+            gCombinedSink->setPreviewWindow(window);
+            return true;
+        }
+
+        int normalizedMask = cameraMask & COMBINED_CAMERA_MASK_ALL;
+        if (normalizedMask == 0)
+        {
+            normalizedMask = COMBINED_CAMERA_MASK_ALL;
+        }
+        // The empty output path is what makes this a preview: see CombinedRecordingSink.
+        auto sink = std::make_shared<CombinedRecordingSink>(
+            std::string(), cellWidth, cellHeight, fps, 0, signature, showSpeed);
+        if (!sink->initialize() || !attachCombinedSinkLocked(sink, normalizedMask))
+        {
+            ANativeWindow_release(window);
+            return false;
+        }
+        sink->setPreviewWindow(window);
+        gCombinedSink = sink;
+        logi("combined preview attached with camera mask 0x%x", normalizedMask);
+        return true;
+    }
+
+    /**
+     * Stops showing it. A recording composer keeps going without its window; a preview-only one
+     * has nothing left to do and lets the cameras go.
+     */
+    int previewCanvasWidth(int cellWidth, int cellHeight)
+    {
+        return combinedCanvasWidth(cellWidth, cellHeight);
+    }
+
+    int previewCanvasHeight(int cellWidth, int cellHeight)
+    {
+        return combinedCanvasHeight(cellWidth, cellHeight);
+    }
+
+    bool detachCombinedPreview()
+    {
+        std::shared_ptr<CombinedRecordingSink> sink;
+        {
+            std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
+            if (gCombinedSink == nullptr)
+            {
+                return true;
+            }
+            if (gCombinedRecordingActive)
+            {
+                gCombinedSink->setPreviewWindow(nullptr);
+                return true;
+            }
+            sink = gCombinedSink;
+            gCombinedSink.reset();
+        }
+        sink->setPreviewWindow(nullptr);
+        sink->requestStop();
+        const bool detached = detachCombinedSessions();
+        const bool stopped = sink->waitUntilStopped(STOP_WAIT_MS);
+        return detached && stopped;
     }
 
     bool stopCombinedRecording()

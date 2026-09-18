@@ -30,6 +30,10 @@
     <string name="camera_right">Destra</string>
     <string name="btn_test_clip">Registra uno spezzone di prova</string>
     <string name="btn_eject_usb">Ferma ed espelli la USB</string>
+    <string name="btn_preview_close">Chiudi</string>
+    <string name="section_tools">Strumenti</string>
+    <string name="btn_preview_grid">Anteprima del fotogramma</string>
+    <string name="preview_unavailable">Non posso mostrarlo: le telecamere non sono disponibili. Di solito vuol dire che le tiene la vista 360 di serie, finché è sullo schermo.</string>
     <string name="btn_storage_details">Mostra i dettagli di archiviazione</string>
     <string name="btn_send_probe">Manda un referto diagnostico</string>
     <string name="probe_dialog_title">Mandare il referto all\'autore?</string>
