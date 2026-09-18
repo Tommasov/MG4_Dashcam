@@ -854,10 +854,29 @@ public class RecordingService extends Service {
                         oemForegroundSinceMs = now;
                     }
                     if (!oemPauseRequested) {
-                        DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
-                        pausedSinceMs = now;
-                        beginOemPauseNow();
-                        publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
+                        // The same gate OemAvmReceiver applies to the broadcast, applied here
+                        // too - because here is where it actually happens. The broadcast never
+                        // arrives on this vehicle, so the speed threshold shown in the settings
+                        // was being honoured only on a path that never runs: the promise that
+                        // the dashcam does not let go of the cameras while the car is moving was
+                        // written on the screen and enforced nowhere.
+                        //
+                        // Read only at this moment rather than on every poll: five system
+                        // property reads a second to answer a question that matters a few times
+                        // a drive is a poor trade.
+                        int speedKmh = VehicleSpeedReader.readSpeedKmh();
+                        int maxSpeedKmh = UiPrefs.getDevOemAvmMaxSpeedKmh(prefs());
+                        if (speedKmh > maxSpeedKmh) {
+                            DevRuntimeLog.add("RecordingService",
+                                    "oem in foreground at " + speedKmh + " km/h (threshold "
+                                            + maxSpeedKmh + "); keeping the cameras");
+                            oemForegroundSinceMs = 0L;
+                        } else {
+                            DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
+                            pausedSinceMs = now;
+                            beginOemPauseNow();
+                            publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
+                        }
                     }
                 } else if (oemPauseRequested) {
                     if (oemGoneSinceMs == 0L) {
