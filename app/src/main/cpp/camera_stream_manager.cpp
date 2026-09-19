@@ -943,7 +943,7 @@ namespace camera_stream_manager
                 {
                     return;
                 }
-                if (rgbaFrame.cols < cellWidth_ || rgbaFrame.rows < cellHeight_)
+                if (rgbaFrame.cols < cellWidth_ || rgbaFrame.rows <= 0)
                 {
                     return;
                 }
@@ -957,8 +957,20 @@ namespace camera_stream_manager
                 // No mirroring here, deliberately. Upstream flips the rear view horizontally to
                 // match what a driver expects from a mirror, which is right when reversing and
                 // wrong in an archive: it reverses every number plate behind you.
-                cv::Mat rgbaCrop = rgbaFrame(cv::Rect(0, 0, cellWidth_, cellHeight_));
-                rgbaCrop.copyTo(latestFrames_[sourceIndex]);
+                cv::Mat rgbaCrop = rgbaFrame(cv::Rect(0, 0, cellWidth_,
+                                                      std::min(rgbaFrame.rows, cellHeight_)));
+                if (rgbaCrop.rows == cellHeight_)
+                {
+                    rgbaCrop.copyTo(latestFrames_[sourceIndex]);
+                }
+                else
+                {
+                    // A field arriving at half the cell height is stretched to fill it. Bilinear
+                    // on purpose: there is no detail to recover here, and a sharper filter would
+                    // only invent edges for the encoder to pay for.
+                    cv::resize(rgbaCrop, latestFrames_[sourceIndex],
+                               cv::Size(cellWidth_, cellHeight_), 0, 0, cv::INTER_LINEAR);
+                }
 
                 const int64_t elapsedUs = nowUs() - startUs_;
                 if (elapsedUs < nextPtsUs_)
@@ -1680,7 +1692,11 @@ namespace camera_stream_manager
                 // assumed. Keeping one field, which is what this app did until now, threw away
                 // 127% more vertical detail than it kept.
                 fieldHeight_ = srcHeight_ / 2;
-                cropHeight_ = srcHeight_;
+                // ESPERIMENTO: torna a consegnare un semiquadro, come fino alla beta.6. Serve a
+                // separare due sospetti che erano arrivati insieme nella beta.7 - il costo del
+                // deinterlacciamento e quello di una tela da 1,5 megapixel. Qui resta solo il
+                // secondo. deinterlaceLocked() e' ancora nel file, pronta a rientrare.
+                cropHeight_ = fieldHeight_;
 
                 {
                     char line[256];
@@ -1991,7 +2007,9 @@ namespace camera_stream_manager
                         }
 
                         cv::Mat packedFrame(srcHeight_, srcWidth_, CV_8UC2, buffers_[buffer.index].start, srcStrideBytes_);
-                        deinterlaceLocked(packedFrame);
+                        cv::Mat packedCrop = packedFrame(cv::Rect(0, 0, cropWidth_, cropHeight_));
+                        rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
+                        cv::cvtColor(packedCrop, rgbaScratch_, rgbaConversionCode(packedFormat_));
                         countFrame(videoIndex_, nowUs());
 
                         std::vector<std::shared_ptr<FrameConsumer>> consumers;
