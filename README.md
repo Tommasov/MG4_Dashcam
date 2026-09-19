@@ -13,9 +13,9 @@ all. See [Relationship to upstream](#relationship-to-upstream).
 > — one on the move, one while parking — and recording picked itself back up both times.
 >
 > That car is the author's. Nobody else's MG4 has run this, and the internal-storage target and
-> the event save still have little real mileage. Two known limits: the app refuses to choose
-> when **two** USB volumes are connected, and sharing one stick with music playback can make
-> the music stutter — both are being worked on.
+> the event save still have little real mileage. One known limit: sharing a stick with music
+> playback can make the music stutter. Two USB volumes used to stop it recording altogether;
+> since 1.0.2 it asks which one to use.
 
 <p align="center">
   <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/screenshot-day.png" alt="The dashcam screen on the head unit, light theme" width="90%">
@@ -44,7 +44,11 @@ all. See [Relationship to upstream](#relationship-to-upstream).
 
   If the loop is not running, the event captures the next three segments instead of the
   previous ones.
-- Records to internal storage, to a USB stick, or to USB with a fall back to internal.
+- Records to internal storage, to a USB stick, or to USB with a fall back to internal. With
+  more than one stick connected it asks which, remembers the answer by the volume's UUID, and
+  says so plainly when the chosen one is not plugged in rather than quietly writing elsewhere.
+- Shows what the recordings occupy, and clears them on request.
+- Lets the bitrate be set, from the same screen.
 - Yields the cameras while the factory 360/reverse view is on screen, so the stock reversing
   camera keeps working. Turning this off means the OEM app gets "Device or resource busy" for
   as long as the dashcam is recording.
@@ -96,26 +100,34 @@ judge, in footage somebody may one day have to read carefully.
 ### What the next major version will look like
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="Mock-up of the planned layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions" width="90%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A recorded frame from the new layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions" width="90%">
 </p>
 
 <p align="center">
-  <em>A mock-up, made by taking the frame above apart and putting it back together the new way.</em>
+  <em>Not a mock-up any more: a frame recorded by 1.1.0-beta.8.</em>
 </p>
 
 A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no black. Front and
 rear sit side by side on top, which is the pair you want together when you are working out who
 came from where; left and right go below, each on the side it belongs to.
 
+It is being built on the [`grid-2x2`](../../tree/grid-2x2) branch and it records, at **25 fps**
+— the same as the factory 360 app. Getting there was not a matter of the layout: four cameras
+open together delivered six frames a second each until it turned out that the buffers
+`VIDIOC_REQBUFS` returns are not cached, and that reading one costs four milliseconds however
+few bytes you take from it.
+
 Three smaller decisions came with it:
 
 - **The rear view stops being mirrored.** Upstream flips it horizontally to match what a driver
   expects from a mirror, which is right when you are reversing and wrong in an archive: it
   reverses every number plate behind you.
-- **The upscale is bilinear**, not lanczos. Doubling the height of a cell cannot recover detail
-  that was never captured, so a sharper filter only invents edges - and the encoder then pays
-  for them. Measured on real footage at equal quality: lanczos costs 61 per cent more bitrate
-  than the current frame, bicubic 57, bilinear 41.
+- **The upscale is bilinear**, not lanczos. A sharper filter only invents edges the encoder
+  then pays for. Measured on real footage at equal quality: lanczos costs 61 per cent more
+  bitrate than the current frame, bicubic 57, bilinear 41. It is an upscale only because the
+  second field is still being discarded; see
+  [the factory app's hidden recorder](#why-it-is-worth-knowing-about) for why that is a choice
+  and not a limit.
 - **The bitrate stays at 9 Mbit/s.** Quality per pixel drops, but today almost a fifth of those
   bits go on black and the side views are unreadable anyway. Spending the same budget on picture
   is the better trade, and it keeps the write rate - and the USB stick - where it is.
@@ -290,17 +302,27 @@ to be given on the command line.
 
 ### Why it is worth knowing about
 
-Those stills are the reference for what the cameras actually deliver: **720x480 per camera,
-progressive, no interlace combing**. This app records cells of 720x240, because the V4L2 buffer
-holds two 240-row halves stacked and the capture path keeps one of them.
+Those stills are what sent us looking at the capture format, and they are **720x480 per
+camera**. This app records cells of 720x240, because the V4L2 buffer holds two 240-row halves
+stacked and the capture path keeps one of them.
 
-That costs vertical resolution, not field of view - a 720x240 cell stretched back to 720x480 is
-a complete, correctly proportioned fisheye, matching the factory still. Raising the crop to 480
-would not help, since it would yield the same picture twice; the two halves would have to be
-interleaved. Whether that is worth doing depends on something still untested: if the two halves
-are captured 1/50 s apart, weaving them combs every moving object, and keeping one is the right
-choice. Recording with `RecordActivity` **while driving** and looking for combing in the
-1440x960 output settles it.
+That costs vertical resolution, not field of view: a 720x240 cell stretched back to 720x480 is
+a complete, correctly proportioned fisheye. But the other half is not a duplicate, and it is
+not noise either. **The buffer is interlaced**, measured on a raw dump rather than guessed:
+the two halves differ in 73% of their bytes, the second half's lines sit *between* the first
+half's, and the gradient across the A→B and B→A joins is the same to within 0.4% — which is
+what interleaving two fields of one picture looks like and what a duplicate cannot produce.
+Woven, the vertical detail is **127% higher** than line-doubling gives.
+
+The factory stills are not evidence against this. They are progressive because the factory app
+runs the frames through the MediaTek hardware de-interlacer before saving them:
+`libv4l2utils.so` exports `v4l2_OpenMtkDI`. The driver's own `field=V4L2_FIELD_NONE` is simply
+wrong.
+
+So the missing lines are recoverable, and the way to do it is the hardware path the factory app
+already uses — it holds 25 fps while doing so. The full evidence, the method for reproducing it
+and a software attempt that was measured and then parked are on the
+[`grid-2x2`](../../tree/grid-2x2/docs) branch, where the next major version is being built.
 
 ## Diagnostics
 
