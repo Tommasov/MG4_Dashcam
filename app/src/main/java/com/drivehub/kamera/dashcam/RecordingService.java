@@ -114,14 +114,7 @@ public class RecordingService extends Service {
      * ones would be a picture of a layout nobody records.
      */
     public static final int CELL_WIDTH = 720;
-    /**
-     * The full frame height, not half of it.
-     *
-     * <p>The capture path used to hand over one field of the interlaced buffer and this was 240
-     * to match. It now deinterlaces, so a cell is the whole picture the camera took - see
-     * docs/camera-format.md.
-     */
-    public static final int CELL_HEIGHT = 480;
+    public static final int CELL_HEIGHT = 240;
     private static final int EVENT_SEGMENTS_BEFORE_CURRENT = 2;
     private static final int EVENT_SEGMENTS_AFTER_CURRENT = 2;
     private static final int FUTURE_ONLY_EVENT_SEGMENTS = 3;

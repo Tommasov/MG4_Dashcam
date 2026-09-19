@@ -125,40 +125,6 @@ namespace camera_stream_manager
         std::mutex gFormatMutex;
         std::map<int, std::string> gFormats;
 
-        /**
-         * How many frames each camera has actually delivered, and how many the grid composed.
-         *
-         * <p>"The preview is not smooth" is a feeling; this turns it into a number. If a camera
-         * reports well under the configured rate, the capture thread is losing time somewhere -
-         * to the deinterlacing, to the preview copy, or to the encoder - and which of those it is
-         * can then be tested instead of guessed.
-         */
-        std::mutex gRateMutex;
-        std::map<int, long long> gFrameCounts;
-        std::map<int, int64_t> gFrameFirstUs;
-        long long gComposedFrames = 0;
-        int64_t gComposedFirstUs = 0;
-
-        void countFrame(int videoIndex, int64_t nowUs)
-        {
-            std::lock_guard<std::mutex> lock(gRateMutex);
-            if (gFrameCounts[videoIndex] == 0)
-            {
-                gFrameFirstUs[videoIndex] = nowUs;
-            }
-            gFrameCounts[videoIndex]++;
-        }
-
-        void countComposedFrame(int64_t nowUs)
-        {
-            std::lock_guard<std::mutex> lock(gRateMutex);
-            if (gComposedFrames == 0)
-            {
-                gComposedFirstUs = nowUs;
-            }
-            gComposedFrames++;
-        }
-
         void rememberFormat(int videoIndex, const std::string &line)
         {
             std::lock_guard<std::mutex> lock(gFormatMutex);
@@ -270,15 +236,9 @@ namespace camera_stream_manager
             bool initialize(int srcWidth, int srcHeight)
             {
                 recWidth_ = std::min(requestedWidth_, srcWidth);
-                // The assignment below used to be inside the comment above it, so recHeight_ kept
-                // its initial 0, the validity check just below rejected it, and this recorder
-                // could never start - it is still that way upstream. Worth reporting there.
-                //
-                // The comment was also wrong about what the other half of the buffer holds: not a
-                // second camera, but the second field of an interlaced frame. The capture path
-                // now weaves them, so a frame arriving here is the full height and nothing needs
-                // halving. See docs/camera-format.md.
-                recHeight_ = std::min(requestedHeight_, srcHeight);
+                // srcHeight_ is double the actual frame height because the V4L2 device
+                // stacks two camera inputs vertically in a single UYVY buffer.
+                // We only encode the top half (one camera).        recHeight_ = std::min(requestedHeight_, srcHeight / 2);
                 if (recWidth_ <= 0 || recHeight_ <= 0 || (recWidth_ % 2) != 0 || (recHeight_ % 2) != 0)
                 {
                     loge("slot=%d invalid recording size %dx%d for /dev/video%d", slot_, recWidth_, recHeight_, videoIndex_);
@@ -700,14 +660,14 @@ namespace camera_stream_manager
          * <p>The sink builds its buffers from this and the preview sizes its window from it, so a
          * change to the layout cannot leave one of them believing the old shape.
          */
-        int combinedCanvasWidth(int cellWidth, int /*cellHeight*/)
+        int combinedCanvasWidth(int cellWidth, int cellHeight)
         {
-            return cellWidth * 2;
+            return cellWidth + (cellHeight * 2);
         }
 
-        int combinedCanvasHeight(int /*cellWidth*/, int cellHeight)
+        int combinedCanvasHeight(int cellWidth, int /*cellHeight*/)
         {
-            return (cellHeight * 2) + COMBINED_FOOTER_HEIGHT;
+            return cellWidth + COMBINED_FOOTER_HEIGHT;
         }
 
         class CombinedRecordingSink : public std::enable_shared_from_this<CombinedRecordingSink>
@@ -718,10 +678,13 @@ namespace camera_stream_manager
                 : outputPath_(std::move(outputPath)),
                   cellWidth_(cellWidth),
                   cellHeight_(cellHeight),
+                  sideWidth_(cellHeight),
+                  sideHeight_(cellWidth),
                   gridWidth_(combinedCanvasWidth(cellWidth, cellHeight)),
-                  gridHeight_(cellHeight * 2),
+                  gridHeight_(cellWidth),
                   footerHeight_(COMBINED_FOOTER_HEIGHT),
                   totalHeight_(combinedCanvasHeight(cellWidth, cellHeight)),
+                  centerStackTop_((gridHeight_ - (cellHeight * 2)) / 2),
                   fps_(fps),
                   bitrate_(bitrate),
                   signature_(std::move(signature)),
@@ -805,32 +768,12 @@ namespace camera_stream_manager
                 return previewWindow_ != nullptr;
             }
 
-            /**
-             * How often the preview is refreshed, at most.
-             *
-             * <p>Posting it costs a copy of the whole canvas - six megabytes now that the grid is
-             * 1440x1040 - and the copy happens on a capture thread, which is not rewarding the
-             * V4L2 buffer to the driver while it runs. At the recording rate that is 150 MB/s of
-             * memcpy stealing time from the cameras, which is why the preview was never smooth
-             * even before the deinterlacing was added.
-             *
-             * <p>Twelve a second is plenty for judging a layout and for seeing that the cameras
-             * are alive, and it halves what the capture threads give up for it.
-             */
-            static constexpr int64_t PREVIEW_INTERVAL_US = 1000000 / 12;
-
             void postCanvasToPreviewLocked()
             {
                 if (previewWindow_ == nullptr || rgbaCanvas_.empty())
                 {
                     return;
                 }
-                const int64_t now = nowUs();
-                if (now - lastPreviewUs_ < PREVIEW_INTERVAL_US)
-                {
-                    return;
-                }
-                lastPreviewUs_ = now;
                 ANativeWindow_Buffer out{};
                 if (ANativeWindow_lock(previewWindow_, &out, nullptr) != 0)
                 {
@@ -943,7 +886,7 @@ namespace camera_stream_manager
                 {
                     return;
                 }
-                if (rgbaFrame.cols < cellWidth_ || rgbaFrame.rows <= 0)
+                if (rgbaFrame.cols < cellWidth_ || rgbaFrame.rows < cellHeight_)
                 {
                     return;
                 }
@@ -954,22 +897,14 @@ namespace camera_stream_manager
                     return;
                 }
 
-                // No mirroring here, deliberately. Upstream flips the rear view horizontally to
-                // match what a driver expects from a mirror, which is right when reversing and
-                // wrong in an archive: it reverses every number plate behind you.
-                cv::Mat rgbaCrop = rgbaFrame(cv::Rect(0, 0, cellWidth_,
-                                                      std::min(rgbaFrame.rows, cellHeight_)));
-                if (rgbaCrop.rows == cellHeight_)
+                cv::Mat rgbaCrop = rgbaFrame(cv::Rect(0, 0, cellWidth_, cellHeight_));
+                if (sourceIndex == 3)
                 {
-                    rgbaCrop.copyTo(latestFrames_[sourceIndex]);
+                    cv::flip(rgbaCrop, latestFrames_[sourceIndex], 1);
                 }
                 else
                 {
-                    // A field arriving at half the cell height is stretched to fill it. Bilinear
-                    // on purpose: there is no detail to recover here, and a sharper filter would
-                    // only invent edges for the encoder to pay for.
-                    cv::resize(rgbaCrop, latestFrames_[sourceIndex],
-                               cv::Size(cellWidth_, cellHeight_), 0, 0, cv::INTER_LINEAR);
+                    rgbaCrop.copyTo(latestFrames_[sourceIndex]);
                 }
 
                 const int64_t elapsedUs = nowUs() - startUs_;
@@ -980,7 +915,6 @@ namespace camera_stream_manager
                 }
 
                 composeCanvasLocked();
-                countComposedFrame(nowUs());
                 postCanvasToPreviewLocked();
                 if (!isRecording())
                 {
@@ -1144,22 +1078,14 @@ namespace camera_stream_manager
 
             void composeCanvasLocked()
             {
-                // A 2x2 grid, every cell at the shape its camera actually has.
-                //
-                // The old layout stood the side cameras on end and stacked front and rear between
-                // them, which left 18% of every frame black and squashed all four views - the
-                // centre ones vertically, the sides horizontally once rotated. Nothing about that
-                // was chosen for a recording: the cell size came from upstream's full-screen
-                // single-camera view, and the grid was assembled out of whatever shape that left.
-                //
-                // Front and rear sit side by side because that is the pair worth reading together
-                // when working out who came from where. Left and right go below, each on the side
-                // it belongs to.
                 rgbaCanvas_.setTo(cv::Scalar(0, 0, 0, 255));
-                latestFrames_[0].copyTo(rgbaCanvas_(cv::Rect(0, 0, cellWidth_, cellHeight_)));
-                latestFrames_[3].copyTo(rgbaCanvas_(cv::Rect(cellWidth_, 0, cellWidth_, cellHeight_)));
-                latestFrames_[2].copyTo(rgbaCanvas_(cv::Rect(0, cellHeight_, cellWidth_, cellHeight_)));
-                latestFrames_[1].copyTo(rgbaCanvas_(cv::Rect(cellWidth_, cellHeight_, cellWidth_, cellHeight_)));
+                cv::rotate(latestFrames_[2], leftRotated_, cv::ROTATE_90_COUNTERCLOCKWISE);
+                cv::rotate(latestFrames_[1], rightRotated_, cv::ROTATE_90_CLOCKWISE);
+
+                leftRotated_.copyTo(rgbaCanvas_(cv::Rect(0, 0, sideWidth_, sideHeight_)));
+                latestFrames_[0].copyTo(rgbaCanvas_(cv::Rect(sideWidth_, centerStackTop_, cellWidth_, cellHeight_)));
+                latestFrames_[3].copyTo(rgbaCanvas_(cv::Rect(sideWidth_, centerStackTop_ + cellHeight_, cellWidth_, cellHeight_)));
+                rightRotated_.copyTo(rgbaCanvas_(cv::Rect(sideWidth_ + cellWidth_, 0, sideWidth_, sideHeight_)));
                 drawFooterLocked();
             }
 
@@ -1316,10 +1242,13 @@ namespace camera_stream_manager
             const std::string outputPath_;
             const int cellWidth_;
             const int cellHeight_;
+            const int sideWidth_;
+            const int sideHeight_;
             const int gridWidth_;
             const int gridHeight_;
             const int footerHeight_;
             const int totalHeight_;
+            const int centerStackTop_;
             const int fps_;
             const int bitrate_;
             const std::string signature_;
@@ -1342,9 +1271,10 @@ namespace camera_stream_manager
             cv::Mat rgbaCanvas_;
             /** Where the composed canvas is also shown, when somebody is looking. */
             ANativeWindow *previewWindow_ = nullptr;
-            int64_t lastPreviewUs_ = 0;
             cv::Mat i420Frame_;
             std::array<cv::Mat, 4> latestFrames_{};
+            cv::Mat leftRotated_;
+            cv::Mat rightRotated_;
             std::vector<uint8_t> encoderFrame_;
             std::atomic<int> currentSpeedKmh_{0};
 
@@ -1686,17 +1616,7 @@ namespace camera_stream_manager
                 srcHeight_ = format.fmt.pix.height;
                 srcStrideBytes_ = format.fmt.pix.bytesperline;
                 cropWidth_ = srcWidth_;
-                // One field is half the buffer; the frame is the whole of it. The device reports
-                // 720x480 and calls it progressive, and it is not: the two halves are the two
-                // fields of one interlaced frame. See docs/camera-format.md - it is measured, not
-                // assumed. Keeping one field, which is what this app did until now, threw away
-                // 127% more vertical detail than it kept.
-                fieldHeight_ = srcHeight_ / 2;
-                // ESPERIMENTO: torna a consegnare un semiquadro, come fino alla beta.6. Serve a
-                // separare due sospetti che erano arrivati insieme nella beta.7 - il costo del
-                // deinterlacciamento e quello di una tela da 1,5 megapixel. Qui resta solo il
-                // secondo. deinterlaceLocked() e' ancora nel file, pronta a rientrare.
-                cropHeight_ = fieldHeight_;
+                cropHeight_ = srcHeight_ / 2;
 
                 {
                     char line[256];
@@ -1839,95 +1759,6 @@ namespace camera_stream_manager
                 }
             }
 
-            /**
-             * How much a pixel must change between one frame and the next to count as moving.
-             *
-             * <p>In luma levels, over 1/25 s. Sensor noise is two or three even in poor light, so
-             * twelve is clear of it while still catching a slow pan.
-             */
-            static constexpr int MOTION_THRESHOLD = 12;
-
-            /**
-             * Rebuilds the full frame from the two fields in the buffer, without combing.
-             *
-             * <p>The even lines are the top field and are always taken as they are: they were
-             * captured, they are real. Every odd line has two candidates - the bottom field line
-             * that was captured at that position, and the average of the top-field lines above
-             * and below it.
-             *
-             * <p>Which one is right depends on whether anything moved in the 1/50 s between the
-             * two fields. Weaving a still scene doubles the vertical resolution honestly; weaving
-             * a moving one serrates every edge, because the two halves of the picture are showing
-             * different moments. So the choice is made per pixel, by asking whether the captured
-             * line disagrees with *both* of its neighbours in the same direction - which is what a
-             * combed edge looks like and what a vertical detail does not.
-             *
-             * <p>Where it disagrees, the interpolation is used: that is exactly the picture this
-             * app recorded before, so the worst case of this whole change is the old behaviour,
-             * on the pixels that would have combed.
-             */
-            void deinterlaceLocked(const cv::Mat &packedFrame)
-            {
-                const int code = rgbaConversionCode(packedFormat_);
-                const cv::Mat packedTop = packedFrame(cv::Rect(0, 0, cropWidth_, fieldHeight_));
-                const cv::Mat packedBot = packedFrame(cv::Rect(0, fieldHeight_, cropWidth_, fieldHeight_));
-
-                cv::cvtColor(packedTop, rgbaTopField_, code);
-                cv::cvtColor(packedBot, rgbaBotField_, code);
-
-                // Luma straight out of the packed pairs: UYVY carries it in channel 1, so this is
-                // a strided read rather than another colour conversion.
-                cv::extractChannel(packedTop, lumaTopField_, 1);
-                cv::extractChannel(packedBot, lumaBotField_, 1);
-
-                const int last = fieldHeight_ - 1;
-                interpolated_.create(fieldHeight_, cropWidth_, CV_8UC4);
-                cv::addWeighted(rgbaTopField_.rowRange(0, last), 0.5,
-                                rgbaTopField_.rowRange(1, fieldHeight_), 0.5, 0.0,
-                                interpolated_.rowRange(0, last));
-                // The last odd line has no top-field line below it to average with.
-                rgbaTopField_.row(last).copyTo(interpolated_.row(last));
-
-                // Motion is found by comparing this frame's top field with the last one: same
-                // lines, same parity, so a difference can only be movement or noise - never
-                // vertical detail.
-                //
-                // The first attempt asked instead whether a bottom-field pixel sat outside both
-                // of its top-field neighbours, which needs no history but cannot tell a moving
-                // edge from a sharp one. On the car it did exactly the wrong thing both ways:
-                // interpolated half of a still lawn, throwing away the detail this whole change
-                // exists to recover, and left the combing on a walking leg untouched - because at
-                // the edge of a moving object the two neighbours straddle the edge, the two
-                // differences take opposite signs, and the test cancels itself out.
-                if (lumaTopPrev_.size() == lumaTopField_.size() && lumaTopPrev_.type() == lumaTopField_.type())
-                {
-                    cv::absdiff(lumaTopField_, lumaTopPrev_, motionDiff_);
-                    cv::compare(motionDiff_, MOTION_THRESHOLD, combMask_, cv::CMP_GT);
-                    // Combing shows at the edges of a moving thing, and those edges move too.
-                    // Growing the mask by a pixel keeps the fringe from being woven.
-                    cv::dilate(combMask_, combMask_, cv::Mat());
-                }
-                else
-                {
-                    // No previous frame to compare against: interpolate everything, which is what
-                    // the app produced before any of this.
-                    combMask_.create(fieldHeight_, cropWidth_, CV_8UC1);
-                    combMask_.setTo(cv::Scalar(255));
-                }
-                lumaTopField_.copyTo(lumaTopPrev_);
-
-                rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
-                // Views onto alternate lines of the output: same data, twice the row step. Lets
-                // both fields be written with one copy each instead of a loop over 480 rows.
-                cv::Mat evenLines(fieldHeight_, cropWidth_, CV_8UC4,
-                                  rgbaScratch_.data, rgbaScratch_.step[0] * 2);
-                cv::Mat oddLines(fieldHeight_, cropWidth_, CV_8UC4,
-                                 rgbaScratch_.data + rgbaScratch_.step[0], rgbaScratch_.step[0] * 2);
-                rgbaTopField_.copyTo(evenLines);
-                rgbaBotField_.copyTo(oddLines);
-                interpolated_.copyTo(oddLines, combMask_);
-            }
-
             void renderPreviewLocked(const cv::Mat &rgbaFrame)
             {
                 if (previewWindow_ == nullptr)
@@ -2008,9 +1839,10 @@ namespace camera_stream_manager
 
                         cv::Mat packedFrame(srcHeight_, srcWidth_, CV_8UC2, buffers_[buffer.index].start, srcStrideBytes_);
                         cv::Mat packedCrop = packedFrame(cv::Rect(0, 0, cropWidth_, cropHeight_));
+
+                        const int conversionCode = rgbaConversionCode(packedFormat_);
                         rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
-                        cv::cvtColor(packedCrop, rgbaScratch_, rgbaConversionCode(packedFormat_));
-                        countFrame(videoIndex_, nowUs());
+                        cv::cvtColor(packedCrop, rgbaScratch_, conversionCode);
 
                         std::vector<std::shared_ptr<FrameConsumer>> consumers;
                         {
@@ -2081,20 +1913,11 @@ namespace camera_stream_manager
                 }
 
                 rgbaScratch_.release();
-                rgbaTopField_.release();
-                rgbaBotField_.release();
-                lumaTopField_.release();
-                lumaBotField_.release();
-                interpolated_.release();
-                lumaTopPrev_.release();
-                motionDiff_.release();
-                combMask_.release();
                 srcWidth_ = 0;
                 srcHeight_ = 0;
                 srcStrideBytes_ = 0;
                 cropWidth_ = 0;
                 cropHeight_ = 0;
-                fieldHeight_ = 0;
                 pixelFormat_ = 0;
                 packedFormat_ = PackedFormat::UNKNOWN;
             }
@@ -2150,10 +1973,7 @@ namespace camera_stream_manager
             int srcHeight_ = 0;
             int srcStrideBytes_ = 0;
             int cropWidth_ = 0;
-            /** The full frame height: what consumers now receive. */
             int cropHeight_ = 0;
-            /** Half of it: the height of one field, and of every scratch buffer below. */
-            int fieldHeight_ = 0;
             std::vector<MappedBuffer> buffers_;
             ANativeWindow *previewWindow_ = nullptr;
             std::unordered_map<int, std::shared_ptr<FrameConsumer>> consumers_;
@@ -2161,16 +1981,6 @@ namespace camera_stream_manager
             std::atomic<bool> stopRequested_{false};
             std::thread worker_;
             cv::Mat rgbaScratch_;
-            // Deinterlacing scratch. Allocated once and reused: four cameras at 25 fps is no
-            // place to be asking the allocator for anything.
-            cv::Mat rgbaTopField_;
-            cv::Mat rgbaBotField_;
-            cv::Mat lumaTopField_;
-            cv::Mat lumaBotField_;
-            cv::Mat interpolated_;
-            cv::Mat lumaTopPrev_;
-            cv::Mat motionDiff_;
-            cv::Mat combMask_;
             cv::Mat previewScratch_;
         };
 
@@ -2572,29 +2382,6 @@ namespace camera_stream_manager
         {
             out += entry.second;
             out += "\n";
-        }
-        {
-            std::lock_guard<std::mutex> rateLock(gRateMutex);
-            const int64_t now = nowUs();
-            char line[160];
-            for (const auto &entry : gFrameCounts)
-            {
-                const double seconds = (now - gFrameFirstUs[entry.first]) / 1000000.0;
-                snprintf(line, sizeof(line), "/dev/video%d: %lld frames in %.1fs = %.1f fps",
-                         entry.first, entry.second, seconds,
-                         seconds > 0.5 ? entry.second / seconds : 0.0);
-                out += line;
-                out += "\n";
-            }
-            if (gComposedFrames > 0)
-            {
-                const double seconds = (now - gComposedFirstUs) / 1000000.0;
-                snprintf(line, sizeof(line), "grid: %lld composed in %.1fs = %.1f fps",
-                         gComposedFrames, seconds,
-                         seconds > 0.5 ? gComposedFrames / seconds : 0.0);
-                out += line;
-                out += "\n";
-            }
         }
         return out;
     }
