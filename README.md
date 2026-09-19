@@ -96,7 +96,7 @@ judge, in footage somebody may one day have to read carefully.
 ### What the next major version records
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A recorded frame from the new layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions and at full vertical resolution" width="90%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A recorded frame from the new layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions" width="90%">
 </p>
 
 <p align="center">
@@ -107,19 +107,28 @@ A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no b
 rear sit side by side on top, which is the pair you want together when you are working out who
 came from where; left and right go below, each on the side it belongs to.
 
-And the cells are not stretched to get there. The capture path now weaves both fields of the
-interlaced buffer back together, so 720x480 is what the camera took rather than what a resampler
-made up - **127% more vertical detail**, measured. See
-[docs/camera-format.md](docs/camera-format.md).
+It records at **25 fps**, the same as the factory 360 app, with the cameras delivering 29.9
+each. Getting there meant finding out why four cameras open together managed six frames a
+second - see [docs/capture-performance.md](docs/capture-performance.md).
+
+The vertical resolution is the part still owed. Each cell is the top field of the interlaced
+buffer, 720x240, stretched to 720x480; the other field's lines are in the buffer and are being
+thrown away. Weaving them back was written and measured - **127% more vertical detail**, see
+[docs/camera-format.md](docs/camera-format.md) - and then parked, because doing it in software
+cost half the frame rate. The way back to it is the MediaTek hardware de-interlacer the factory
+app uses, which gives full-height cells and still holds 25 fps.
+
+The frame above was recorded by 1.1.0-beta.8, which did weave the fields. What the current
+build records has the same geometry and a softer vertical detail.
 
 Three smaller decisions came with it:
 
 - **The rear view stops being mirrored.** Upstream flips it horizontally to match what a driver
   expects from a mirror, which is right when you are reversing and wrong in an archive: it
   reverses every number plate behind you.
-- **Nothing is upscaled.** The plan was a bilinear stretch of the 720x240 cell, chosen because a
-  sharper filter only invents edges that the encoder then pays for. It turned out not to be
-  needed: the missing lines were in the buffer all along.
+- **The stretch is bilinear**, not something sharper. Lanczos cost 61% more bitrate at equal
+  quality and bicubic 57%, against bilinear's 41%: a sharper filter invents edges the encoder
+  then pays for, and there is no real detail there to recover.
 - **The bitrate stays at 9 Mbit/s.** Quality per pixel drops, but today almost a fifth of those
   bits go on black and the side views are unreadable anyway. Spending the same budget on picture
   is the better trade, and it keeps the write rate - and the USB stick - where it is.
@@ -309,6 +318,20 @@ hardware de-interlacer first - `libv4l2utils.so` exports `v4l2_OpenMtkDI`.
 
 The evidence, the method for reproducing it, and what to do about it are in
 [docs/camera-format.md](docs/camera-format.md).
+
+### Reading all four at once
+
+Four cameras open together delivered six frames a second each, against the factory app's
+twenty-five, and the cause was not in the compositor: the buffers `VIDIOC_REQBUFS` hands back
+are **not cached**, and the CPU reads them at about 85 MB/s. Every extra pass over one costs
+another four milliseconds, so a conversion that touches the mapped buffer three times is
+slower than one that touches it once, however much less memory it moves overall.
+
+Reading the buffer once and keeping per-frame housekeeping off the hot path took capture to
+29.9 fps per camera and the recording to 24.4. How to tell a slow device from a slow reader,
+what else looked guilty and was not, and two ways of measuring a frame rate that give
+confidently wrong answers, are in
+[docs/capture-performance.md](docs/capture-performance.md).
 
 ## Diagnostics
 

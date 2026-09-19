@@ -131,8 +131,19 @@ only the build-server path baked into the error messages differs.
 
 ## What this app does about it
 
-Since **1.1.0-beta.9** the capture path weaves the fields back together, motion-adaptively, in
-`deinterlaceLocked`.
+Nothing, as of 1.1.0-beta.21: each cell is the top field, 720x240, stretched to 720x480. The
+other field's lines are in the buffer and are being thrown away.
+
+It was not always so. **1.1.0-beta.7 through beta.11 wove the fields back together**,
+motion-adaptively, in `deinterlaceLocked` — the code is still in
+`camera_stream_manager.cpp`, unused. It was reverted for cost: the cameras were delivering
+7.4 frames a second with it against 12.8 without, and at the time the reason was not
+understood. It is now, and it was not the deinterlacing itself — see
+[capture-performance.md](capture-performance.md) — but a second pass over an uncached V4L2
+buffer is exactly the kind of work that was expensive, and the hardware path below avoids it
+entirely rather than making it cheaper.
+
+What it did, for when it comes back:
 
 The even lines are the top field and are taken as they are: they were captured, they are real.
 Every odd line has two candidates — the bottom-field line captured at that position, and the
@@ -174,10 +185,14 @@ releases recorded everywhere.
 That is not an artefact of this implementation. Every motion-adaptive deinterlacer does it,
 including the hardware one — it interpolates moving regions too, just better.
 
-## What would be better
+## What would be better, and what is next
 
 The MTK de-interlacer — what the factory app does. Motion-adaptive in hardware, at no CPU cost,
 and better than a comb detector working from one frame. It means implementing the full V4L2
 mem2mem path with ION buffers, which is why it is not what happened first.
 
-Either way, the vertical resolution was never lost. It was being thrown away.
+That is the route back to full-height cells, and the case for it is now stronger than when
+this was written: the factory app uses it and holds 25 fps, so the hardware path costs no
+frame rate at all, while the software one measurably did.
+
+Either way, the vertical resolution was never lost. It is being thrown away.
