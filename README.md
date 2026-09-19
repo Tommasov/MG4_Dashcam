@@ -93,29 +93,33 @@ something you cannot read.
 It matters more here than it would elsewhere. Wrong proportions make distance and speed hard to
 judge, in footage somebody may one day have to read carefully.
 
-### What the next major version will look like
+### What the next major version records
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="Mock-up of the planned layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions" width="90%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A recorded frame from the new layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions and at full vertical resolution" width="90%">
 </p>
 
 <p align="center">
-  <em>A mock-up, made by taking the frame above apart and putting it back together the new way.</em>
+  <em>Not a mock-up any more: a frame recorded by 1.1.0-beta.8.</em>
 </p>
 
 A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no black. Front and
 rear sit side by side on top, which is the pair you want together when you are working out who
 came from where; left and right go below, each on the side it belongs to.
 
+And the cells are not stretched to get there. The capture path now weaves both fields of the
+interlaced buffer back together, so 720x480 is what the camera took rather than what a resampler
+made up - **127% more vertical detail**, measured. See
+[docs/camera-format.md](docs/camera-format.md).
+
 Three smaller decisions came with it:
 
 - **The rear view stops being mirrored.** Upstream flips it horizontally to match what a driver
   expects from a mirror, which is right when you are reversing and wrong in an archive: it
   reverses every number plate behind you.
-- **The upscale is bilinear**, not lanczos. Doubling the height of a cell cannot recover detail
-  that was never captured, so a sharper filter only invents edges - and the encoder then pays
-  for them. Measured on real footage at equal quality: lanczos costs 61 per cent more bitrate
-  than the current frame, bicubic 57, bilinear 41.
+- **Nothing is upscaled.** The plan was a bilinear stretch of the 720x240 cell, chosen because a
+  sharper filter only invents edges that the encoder then pays for. It turned out not to be
+  needed: the missing lines were in the buffer all along.
 - **The bitrate stays at 9 Mbit/s.** Quality per pixel drops, but today almost a fifth of those
   bits go on black and the side views are unreadable anyway. Spending the same budget on picture
   is the better trade, and it keeps the write rate - and the USB stick - where it is.

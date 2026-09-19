@@ -69,13 +69,14 @@ is uniform across every boundary. Had one half been a copy of the other, the two
 alternate between roughly zero and a full step. They do not differ at all.
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/interlace-comparison.png" alt="The same crop twice: on the left both fields woven into 720x480, on the right one field with its lines doubled. The woven version resolves the diagonal edge smoothly; the doubled one shows a staircase." width="100%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/daylight-comparison.png" alt="The same crop twice: on the left the deinterlaced frame, on the right the same frame with the second field discarded and the lines doubled. The right side shows obvious horizontal banding." width="100%">
 </p>
 
 <p align="center">
-  <em>The same 150x105 crop from one buffer, magnified 6x without smoothing and brightened -
-  a night capture, which is the unfavourable case. Left: both fields woven. Right: one field
-  with its lines doubled, which is what this app recorded. The diagonal is the tell.</em>
+  <em>One crop of one recorded frame, magnified 5x without smoothing. Left: as 1.1.0-beta.8
+  records it. Right: the same frame with the second field thrown away and the lines doubled,
+  which is what every release before it wrote to disk. Nothing else differs - same instant, same
+  camera, same encoder.</em>
 </p>
 
 **The gain is real.** Vertical detail energy, woven against line-doubled:
