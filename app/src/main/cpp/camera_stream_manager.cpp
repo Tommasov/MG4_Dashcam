@@ -1824,16 +1824,12 @@ namespace camera_stream_manager
             }
 
             /**
-             * How far a bottom-field pixel must sit outside both of its top-field neighbours
-             * before it is treated as motion rather than detail.
+             * How much a pixel must change between one frame and the next to count as moving.
              *
-             * <p>The test is a product of two differences, so this is in units of luma squared:
-             * 400 is both neighbours disagreeing with it by about 20 levels in the same
-             * direction. Low enough to catch a moving edge, high enough that sensor noise - which
-             * is a couple of levels, even on the night capture the format was measured from -
-             * does not trip it.
+             * <p>In luma levels, over 1/25 s. Sensor noise is two or three even in poor light, so
+             * twelve is clear of it while still catching a slow pan.
              */
-            static constexpr int COMB_THRESHOLD = 400;
+            static constexpr int MOTION_THRESHOLD = 12;
 
             /**
              * Rebuilds the full frame from the two fields in the buffer, without combing.
@@ -1876,19 +1872,33 @@ namespace camera_stream_manager
                 // The last odd line has no top-field line below it to average with.
                 rgbaTopField_.row(last).copyTo(interpolated_.row(last));
 
-                lumaTopField_.rowRange(0, last).convertTo(combA_, CV_16S);
-                lumaTopField_.rowRange(1, fieldHeight_).convertTo(combB_, CV_16S);
-                cv::Mat below;
-                lumaBotField_.rowRange(0, last).convertTo(below, CV_16S);
-                combA_ -= below;
-                combB_ -= below;
-                // Same sign means the captured line is outside the range of both neighbours, and
-                // the product is then positive and large. CV_32S because 255 * 255 does not fit
-                // in the 16-bit type the differences arrive in.
-                cv::multiply(combA_, combB_, combProduct_, 1.0, CV_32S);
-                combMask_.create(fieldHeight_, cropWidth_, CV_8UC1);
-                combMask_.setTo(cv::Scalar(0));
-                cv::compare(combProduct_, COMB_THRESHOLD, combMask_.rowRange(0, last), cv::CMP_GT);
+                // Motion is found by comparing this frame's top field with the last one: same
+                // lines, same parity, so a difference can only be movement or noise - never
+                // vertical detail.
+                //
+                // The first attempt asked instead whether a bottom-field pixel sat outside both
+                // of its top-field neighbours, which needs no history but cannot tell a moving
+                // edge from a sharp one. On the car it did exactly the wrong thing both ways:
+                // interpolated half of a still lawn, throwing away the detail this whole change
+                // exists to recover, and left the combing on a walking leg untouched - because at
+                // the edge of a moving object the two neighbours straddle the edge, the two
+                // differences take opposite signs, and the test cancels itself out.
+                if (lumaTopPrev_.size() == lumaTopField_.size() && lumaTopPrev_.type() == lumaTopField_.type())
+                {
+                    cv::absdiff(lumaTopField_, lumaTopPrev_, motionDiff_);
+                    cv::compare(motionDiff_, MOTION_THRESHOLD, combMask_, cv::CMP_GT);
+                    // Combing shows at the edges of a moving thing, and those edges move too.
+                    // Growing the mask by a pixel keeps the fringe from being woven.
+                    cv::dilate(combMask_, combMask_, cv::Mat());
+                }
+                else
+                {
+                    // No previous frame to compare against: interpolate everything, which is what
+                    // the app produced before any of this.
+                    combMask_.create(fieldHeight_, cropWidth_, CV_8UC1);
+                    combMask_.setTo(cv::Scalar(255));
+                }
+                lumaTopField_.copyTo(lumaTopPrev_);
 
                 rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
                 // Views onto alternate lines of the output: same data, twice the row step. Lets
@@ -2058,9 +2068,8 @@ namespace camera_stream_manager
                 lumaTopField_.release();
                 lumaBotField_.release();
                 interpolated_.release();
-                combA_.release();
-                combB_.release();
-                combProduct_.release();
+                lumaTopPrev_.release();
+                motionDiff_.release();
                 combMask_.release();
                 srcWidth_ = 0;
                 srcHeight_ = 0;
@@ -2141,9 +2150,8 @@ namespace camera_stream_manager
             cv::Mat lumaTopField_;
             cv::Mat lumaBotField_;
             cv::Mat interpolated_;
-            cv::Mat combA_;
-            cv::Mat combB_;
-            cv::Mat combProduct_;
+            cv::Mat lumaTopPrev_;
+            cv::Mat motionDiff_;
             cv::Mat combMask_;
             cv::Mat previewScratch_;
         };

@@ -131,21 +131,48 @@ only the build-server path baked into the error messages differs.
 
 ## What this app does about it
 
-Since **1.1.0-beta.8** the capture path weaves the fields back together, motion-adaptively, in
+Since **1.1.0-beta.9** the capture path weaves the fields back together, motion-adaptively, in
 `deinterlaceLocked`.
 
 The even lines are the top field and are taken as they are: they were captured, they are real.
 Every odd line has two candidates — the bottom-field line captured at that position, and the
 average of the top-field lines above and below it. Which is right depends on whether anything
-moved in the 1/50 s between the fields, so the choice is made per pixel: if the captured line
-disagrees with *both* of its neighbours in the same direction, that is what a combed edge looks
-like and what a vertical detail does not, and the interpolation is used instead.
+moved in the 1/50 s between the two fields, so the choice is made per pixel.
 
-The interpolation is exactly the picture this app produced before, so the worst case of the whole
-change is the old behaviour, on the pixels that would have combed.
+**Motion is found by comparing this frame's top field with the previous one.** Same lines, same
+parity: a difference can only be movement or noise, never vertical detail. Where a pixel moved,
+the interpolation is used; where it did not, the captured line is, and the vertical resolution
+is real.
 
-It is deliberately not a plain weave. On a dashcam everything moves, and weaving a moving scene
-serrates every edge because the two halves are showing different moments.
+The interpolation is exactly the picture this app produced before, so the worst case of the
+whole change is the old behaviour, on the pixels that would have combed.
+
+### The detector that did not work
+
+The first attempt used no history. It asked whether a bottom-field pixel sat outside *both* of
+its top-field neighbours in the same direction — the shape of a combed edge. It is appealing
+because it needs nothing but the frame in hand, and on the car it failed in both directions at
+once:
+
+| region | interpolated | wanted |
+|---|---|---|
+| a still lawn | 52% | almost none — that is the detail this change exists to recover |
+| a walking leg | 27% | almost all — the combing was plainly visible |
+
+The reason is that a single frame cannot tell a moving edge from a sharp one. Worse, at the edge
+of a moving object — exactly where combing shows — the two neighbours fall on opposite sides of
+the edge, the two differences take opposite signs, and the test cancels itself out. It was
+blindest precisely where it was needed.
+
+### What to expect from it
+
+The gain is largest when the scene is still and shrinks as it moves, because a moving scene
+genuinely has no 480 lines belonging to one instant. Stopped at a light, parked, manoeuvring:
+full vertical resolution. Driving: most of the frame interpolated, which is what earlier
+releases recorded everywhere.
+
+That is not an artefact of this implementation. Every motion-adaptive deinterlacer does it,
+including the hardware one — it interpolates moving regions too, just better.
 
 ## What would be better
 
