@@ -107,6 +107,14 @@ public class RecordingService extends Service {
     private static final String CHANNEL_ID = "mg4_recording";
     private static final int NOTIF_ID = 42;
     private static final int TOTAL_CAMERAS = 4;
+    /**
+     * The size of one camera's cell in the composed grid.
+     *
+     * <p>Public because the preview composes with the same numbers: a preview built on different
+     * ones would be a picture of a layout nobody records.
+     */
+    public static final int CELL_WIDTH = 720;
+    public static final int CELL_HEIGHT = 240;
     private static final int EVENT_SEGMENTS_BEFORE_CURRENT = 2;
     private static final int EVENT_SEGMENTS_AFTER_CURRENT = 2;
     private static final int FUTURE_ONLY_EVENT_SEGMENTS = 3;
@@ -704,10 +712,10 @@ public class RecordingService extends Service {
         File outputFile = new File(baseDir, baseName + ".mp4");
         boolean started = CameraProbe.startCombinedMp4Record(
                 outputFile.getAbsolutePath(),
-                720,
-                240,
+                CELL_WIDTH,
+                CELL_HEIGHT,
                 recordingFps,
-                9_000_000,
+                DashcamSettings.getRecordingBitrateBps(prefs),
                 signature,
                 showSpeed,
                 cameraMask);
@@ -846,10 +854,29 @@ public class RecordingService extends Service {
                         oemForegroundSinceMs = now;
                     }
                     if (!oemPauseRequested) {
-                        DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
-                        pausedSinceMs = now;
-                        beginOemPauseNow();
-                        publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
+                        // The same gate OemAvmReceiver applies to the broadcast, applied here
+                        // too - because here is where it actually happens. The broadcast never
+                        // arrives on this vehicle, so the speed threshold shown in the settings
+                        // was being honoured only on a path that never runs: the promise that
+                        // the dashcam does not let go of the cameras while the car is moving was
+                        // written on the screen and enforced nowhere.
+                        //
+                        // Read only at this moment rather than on every poll: five system
+                        // property reads a second to answer a question that matters a few times
+                        // a drive is a poor trade.
+                        int speedKmh = VehicleSpeedReader.readSpeedKmh();
+                        int maxSpeedKmh = UiPrefs.getDevOemAvmMaxSpeedKmh(prefs());
+                        if (speedKmh > maxSpeedKmh) {
+                            DevRuntimeLog.add("RecordingService",
+                                    "oem in foreground at " + speedKmh + " km/h (threshold "
+                                            + maxSpeedKmh + "); keeping the cameras");
+                            oemForegroundSinceMs = 0L;
+                        } else {
+                            DevRuntimeLog.add("RecordingService", "oem in foreground without a broadcast");
+                            pausedSinceMs = now;
+                            beginOemPauseNow();
+                            publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
+                        }
                     }
                 } else if (oemPauseRequested) {
                     if (oemGoneSinceMs == 0L) {

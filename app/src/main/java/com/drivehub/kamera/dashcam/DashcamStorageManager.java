@@ -2,6 +2,8 @@ package com.drivehub.kamera.dashcam;
 
 import com.drivehub.kamera.settings.UiPrefs;
 
+import androidx.annotation.NonNull;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
@@ -44,6 +46,8 @@ public final class DashcamStorageManager {
     public static final String KEY_STORAGE_TARGET = "dashcamStorageTarget";
     private static final String KEY_USB_RETENTION_CLIP_COUNT = "dashcamUsbRetentionClipCount";
     private static final String KEY_USB_MAX_RETAINED_EVENT_DIRS = "dashcamUsbMaxRetainedEventDirs";
+    /** Empty means "whichever is there", which is right until a second volume shows up. */
+    private static final String KEY_USB_VOLUME_ID = "dashcamUsbVolumeId";
 
     // USB media are larger and tolerate write load better, so defaults are much more generous
     // than the conservative internal defaults (10 clips / 5 events).
@@ -51,6 +55,8 @@ public final class DashcamStorageManager {
     public static final int DEFAULT_USB_MAX_RETAINED_EVENT_DIRS = 25;
 
     private static final String USB_RECORDS_DIR_NAME = "dashcam";
+    private static final String EVENTS_DIR_NAME = "events";
+    private static final String CLIP_SUFFIX = ".mp4";
     private static final String WRITE_PROBE_FILE_NAME = ".dashcam_write_probe";
     private static final File LEGACY_STORAGE_ROOT = new File("/storage");
     /** Where vold mounts removable media before the per-app FUSE view is layered on. */
@@ -62,7 +68,8 @@ public final class DashcamStorageManager {
         NO_MEDIUM,          // no removable volume mounted under /storage
         NOT_WRITABLE,       // volume(s) found but the dashcam dir cannot be created/written
         WRITE_TEST_FAILED,  // dir exists but the actual write probe failed
-        MULTIPLE_MEDIA      // more than one usable medium — refusing to pick one silently
+        MULTIPLE_MEDIA,     // more than one usable medium and no choice made — see setPreferredVolumeId
+        CHOSEN_VOLUME_ABSENT // a volume was chosen by hand and it is not connected
     }
 
     /** Immutable outcome of one storage resolution pass. */
@@ -133,6 +140,162 @@ public final class DashcamStorageManager {
         return usingUsb
                 ? getUsbMaxRetainedEventDirs(prefs)
                 : DashcamSettings.getMaxRetainedEventDirs(prefs);
+    }
+
+    // ---------- Which volume ----------
+
+    /**
+     * The volume the driver picked, or empty for "whichever is there".
+     *
+     * <p>Stored as the volume's uuid - the FAT serial, the {@code 9EFB-89C8} that also names the
+     * raw vold mount. It survives unplugging, rebooting and being moved between the two ports.
+     * It does not survive reformatting, which is why a chosen volume that is not present says so
+     * rather than quietly recording somewhere else.
+     */
+    @NonNull
+    public static String getPreferredVolumeId(SharedPreferences prefs) {
+        return prefs.getString(KEY_USB_VOLUME_ID, "");
+    }
+
+    public static void setPreferredVolumeId(SharedPreferences prefs, @NonNull String volumeId) {
+        prefs.edit().putString(KEY_USB_VOLUME_ID, volumeId).apply();
+    }
+
+    /** One connected volume, as the picker needs to describe it. */
+    public static final class VolumeChoice {
+        public final String volumeId;
+        public final String description;
+        public final long freeBytes;
+        public final long totalBytes;
+
+        VolumeChoice(String volumeId, String description, long freeBytes, long totalBytes) {
+            this.volumeId = volumeId;
+            this.description = description;
+            this.freeBytes = freeBytes;
+            this.totalBytes = totalBytes;
+        }
+    }
+
+    /** Every removable volume currently connected. Touches the filesystem - not on the main thread. */
+    @NonNull
+    public static List<VolumeChoice> listVolumes(Context context) {
+        List<UsbCandidate> candidates = findUsbCandidates(context);
+        if (candidates.isEmpty()) {
+            candidates = findLegacyStorageCandidates();
+        }
+        List<VolumeChoice> out = new ArrayList<>();
+        for (UsbCandidate candidate : candidates) {
+            out.add(new VolumeChoice(
+                    candidate.volumeId,
+                    candidate.description == null || candidate.description.isEmpty()
+                            ? candidate.rootDir.getName() : candidate.description,
+                    candidate.rootDir.getFreeSpace(),
+                    candidate.rootDir.getTotalSpace()));
+        }
+        return out;
+    }
+
+    // ---------- What is on the medium ----------
+
+    /**
+     * What the dashcam is holding, told apart by what it means rather than by where it sits.
+     *
+     * <p>Loop clips are disposable by design - the ring buffer deletes them itself. Saved events
+     * are the opposite: somebody pressed something to keep those. Any number the app shows, and
+     * anything it offers to delete, has to keep the two apart, or the one button that frees space
+     * becomes the one button that throws away the reason you were recording.
+     */
+    public static final class Usage {
+        public final int clipCount;
+        public final long clipBytes;
+        public final int eventCount;
+        public final long eventBytes;
+
+        Usage(int clipCount, long clipBytes, int eventCount, long eventBytes) {
+            this.clipCount = clipCount;
+            this.clipBytes = clipBytes;
+            this.eventCount = eventCount;
+            this.eventBytes = eventBytes;
+        }
+
+        public long totalBytes() {
+            return clipBytes + eventBytes;
+        }
+
+        public boolean isEmpty() {
+            return clipCount == 0 && eventCount == 0;
+        }
+    }
+
+    /** Walks the records folder. Touches the filesystem - do not call on the main thread. */
+    @NonNull
+    public static Usage measureUsage(Context context) {
+        File base = resolve(context).baseDir;
+        if (base == null || !base.isDirectory()) {
+            return new Usage(0, 0L, 0, 0L);
+        }
+        int clipCount = 0;
+        long clipBytes = 0L;
+        File[] entries = base.listFiles();
+        if (entries != null) {
+            for (File entry : entries) {
+                if (entry.isFile() && entry.getName().endsWith(CLIP_SUFFIX)) {
+                    clipCount++;
+                    clipBytes += entry.length();
+                }
+            }
+        }
+        int eventCount = 0;
+        long eventBytes = 0L;
+        File events = new File(base, EVENTS_DIR_NAME);
+        File[] eventDirs = events.listFiles();
+        if (eventDirs != null) {
+            for (File dir : eventDirs) {
+                if (!dir.isDirectory()) {
+                    continue;
+                }
+                eventCount++;
+                eventBytes += sizeOfDirectory(dir);
+            }
+        }
+        return new Usage(clipCount, clipBytes, eventCount, eventBytes);
+    }
+
+    /**
+     * Deletes the loop clips and nothing else. Returns how many went.
+     *
+     * <p>Only files that sit directly in the records folder and end in the clip suffix: the
+     * events folder is a directory and is never descended into, so it cannot be caught by
+     * accident. Do not call on the main thread.
+     */
+    public static int deleteLoopClips(Context context) {
+        File base = resolve(context).baseDir;
+        if (base == null || !base.isDirectory()) {
+            return 0;
+        }
+        File[] entries = base.listFiles();
+        if (entries == null) {
+            return 0;
+        }
+        int deleted = 0;
+        for (File entry : entries) {
+            if (entry.isFile() && entry.getName().endsWith(CLIP_SUFFIX) && entry.delete()) {
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    private static long sizeOfDirectory(File dir) {
+        long total = 0L;
+        File[] entries = dir.listFiles();
+        if (entries == null) {
+            return 0L;
+        }
+        for (File entry : entries) {
+            total += entry.isDirectory() ? sizeOfDirectory(entry) : entry.length();
+        }
+        return total;
     }
 
     // ---------- Resolution ----------
@@ -332,6 +495,24 @@ public final class DashcamStorageManager {
         }
         if (candidates.isEmpty()) {
             return new UsbProbe(UsbState.NO_MEDIUM, null);
+        }
+        String preferred = getPreferredVolumeId(UiPrefs.getPrefs(context));
+        if (!preferred.isEmpty()) {
+            List<UsbCandidate> chosen = new ArrayList<>();
+            for (UsbCandidate candidate : candidates) {
+                if (preferred.equals(candidate.volumeId)) {
+                    chosen.add(candidate);
+                }
+            }
+            if (chosen.isEmpty()) {
+                // Deliberately not falling back to the other volume. Somebody said "this stick",
+                // and writing a drive's footage to the wrong medium because the right one was
+                // left at home is worse than saying so.
+                trace(trace, "chosen volume " + preferred + " is not connected");
+                return new UsbProbe(UsbState.CHOSEN_VOLUME_ABSENT, null);
+            }
+            trace(trace, "chosen volume " + preferred + " is connected; ignoring the others");
+            candidates = chosen;
         }
         List<UsbCandidate> prioritized = prioritizeUsbCandidates(candidates);
         List<File> usable = new ArrayList<>();

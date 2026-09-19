@@ -16,6 +16,8 @@
     <string name="label_retention_usb">Spezzoni da tenere sulla USB</string>
     <string name="label_max_event_dirs">Eventi salvati da tenere</string>
     <string name="label_fps">Fotogrammi al secondo</string>
+    <string name="label_bitrate">Bitrate del video (kbit/s)</string>
+    <string name="label_bitrate_summary">9000 è il valore predefinito, e costa circa 58 MB al minuto. Abbassalo se sulla stessa chiavetta tieni anche la musica: è la dashcam che scrive forte a far saltare la riproduzione.</string>
     <string name="label_signature">Firma nella fascia inferiore</string>
     <string name="label_show_speed">Mostra la velocità nella fascia inferiore</string>
     <string name="label_oem_coexist">Cedi le telecamere alla vista 360/retromarcia di serie</string>
@@ -28,6 +30,7 @@
     <string name="camera_right">Destra</string>
     <string name="btn_test_clip">Registra uno spezzone di prova</string>
     <string name="btn_eject_usb">Ferma ed espelli la USB</string>
+    <string name="section_tools">Strumenti</string>
     <string name="btn_storage_details">Mostra i dettagli di archiviazione</string>
     <string name="btn_send_probe">Manda un referto diagnostico</string>
     <string name="probe_dialog_title">Mandare il referto all\'autore?</string>
@@ -37,6 +40,32 @@
     <string name="probe_sending">Invio in corso…</string>
     <string name="probe_sent">Mandato: %1$s</string>
     <string name="probe_failed">Non mandato: %1$s</string>
+    <string name="btn_clear_records">Svuota le registrazioni in loop</string>
+    <string name="clear_records_title">Cancellare le registrazioni in loop?</string>
+    <string name="clear_records_message">Rimuove i %1$s di spezzoni da 30 secondi nella cartella di registrazione. Gli eventi salvati non si toccano: restano nella cartella degli eventi, che è il motivo per cui li hai salvati. Non si può annullare.</string>
+    <string name="clear_records_confirm">Cancella</string>
+    <string name="clear_records_none">Niente da cancellare: non ci sono registrazioni in loop.</string>
+    <string name="clear_records_working">Cancellazione in corso…</string>
+    <string name="clear_records_done">Cancellati %1$s, liberati %2$s</string>
+    <string name="storage_usage_checking">Misurazione…</string>
+    <!-- Counted things need their singular. "1 eventi salvati" is the kind of detail that
+         makes an app feel unfinished. -->
+    <plurals name="usage_clips">
+        <item quantity="one">%d spezzone</item>
+        <item quantity="other">%d spezzoni</item>
+    </plurals>
+    <plurals name="usage_events">
+        <item quantity="one">%d evento salvato</item>
+        <item quantity="other">%d eventi salvati</item>
+    </plurals>
+    <plurals name="cleared_clips">
+        <item quantity="one">%d spezzone</item>
+        <item quantity="other">%d spezzoni</item>
+    </plurals>
+    <string name="storage_usage">Occupa %1$s: %2$s, più %3$s</string>
+    <string name="storage_usage_no_events">Occupa %1$s: %2$s</string>
+    <string name="storage_usage_empty">Non c\'è ancora niente di registrato</string>
+    <string name="version_line">%1$s (%2$d)</string>
     <string name="storage_details_working">Controllo in corso…</string>
 
     <string name="section_oem">App 360 di fabbrica</string>
@@ -49,6 +78,15 @@
     <string name="oem_delete_confirm">Cancella</string>
     <string name="oem_deleting">Cancellazione in corso…</string>
 
+    <string name="usb_volume_button">Memoria USB: %1$s</string>
+    <string name="usb_volume_any">quella che trova</string>
+    <string name="usb_volume_title">Quale memoria USB deve usare la dashcam?</string>
+    <string name="usb_volume_message">Scegline una se ne tieni collegata più d\'una — una chiavetta per la dashcam e un\'altra per la musica, per dire. Senza una scelta la dashcam usa quella che trova, e se ne trova due si rifiuta di indovinare.</string>
+    <string name="usb_volume_entry_any">Quella che trova</string>
+    <string name="usb_volume_entry">%1$s — %2$s liberi su %3$s</string>
+    <string name="usb_volume_entry_absent">%1$s — non collegata</string>
+    <string name="usb_volume_none">Non c\'è nessuna memoria USB collegata.</string>
+    <string name="storage_status_chosen_absent">La memoria USB scelta non è collegata</string>
     <string name="storage_status_checking">Controllo dell\'archiviazione…</string>
     <string name="storage_status_internal">Interna: %1$s (USB: %2$s)</string>
     <string name="storage_status_usb">USB: %1$s</string>

@@ -119,15 +119,40 @@
                         android:text="@string/storage_target_usb" />
                 </RadioGroup>
 
+                <Button
+                    android:id="@+id/btnUsbVolume"
+                    style="@style/TonalButton"
+                    android:layout_width="match_parent"
+                    android:gravity="start|center_vertical"
+                    android:textAlignment="viewStart" />
+
                 <TextView
                     android:id="@+id/tvStorageStatus"
                     style="@style/Hint"
                     android:layout_marginTop="4dp" />
 
-                <Button
-                    android:id="@+id/btnEjectUsb"
-                    style="@style/TonalButton"
-                    android:text="@string/btn_eject_usb" />
+                <TextView
+                    android:id="@+id/tvStorageUsage"
+                    style="@style/Hint"
+                    android:layout_marginTop="4dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnEjectUsb"
+                        style="@style/TonalButtonCell"
+                        android:layout_marginEnd="@dimen/button_gap"
+                        android:text="@string/btn_eject_usb" />
+
+                    <Button
+                        android:id="@+id/btnClearRecords"
+                        style="@style/TonalButtonCell"
+                        android:textColor="@color/warning"
+                        android:text="@string/btn_clear_records" />
+                </LinearLayout>
 
                 <TextView
                     style="@style/FieldLabel"
@@ -243,6 +268,22 @@
 
                 <TextView
                     style="@style/FieldLabel"
+                    android:text="@string/label_bitrate" />
+
+                <EditText
+                    android:id="@+id/etBitrate"
+                    style="@style/FieldShort"
+                    android:autofillHints=""
+                    android:inputType="number" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:layout_marginTop="4dp"
+                    android:maxWidth="@dimen/text_measure_max"
+                    android:text="@string/label_bitrate_summary" />
+
+                <TextView
+                    style="@style/FieldLabel"
                     android:text="@string/label_signature" />
 
                 <EditText
@@ -298,7 +339,35 @@
 
         <View style="@style/Hairline" />
 
-        <!-- Full width: the tools, and the report they print -->
+        <TextView
+            style="@style/SectionHeader"
+            android:text="@string/section_tools" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnStorageDetails"
+                style="@style/TonalButtonCell"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:text="@string/btn_storage_details" />
+
+            <Button
+                android:id="@+id/btnSendProbe"
+                style="@style/TonalButtonCell"
+                android:layout_marginEnd="@dimen/button_gap"
+                android:text="@string/btn_send_probe" />
+
+            <Button
+                android:id="@+id/btnTestClip"
+                style="@style/TonalButtonCell"
+                android:text="@string/btn_test_clip" />
+        </LinearLayout>
+
+        <!-- What acts on the factory app, kept apart from what acts on this one: they were
+             under the same heading, which read as if these buttons touched the 360 app too. -->
         <TextView
             style="@style/SectionHeader"
             android:text="@string/section_oem" />
@@ -330,29 +399,6 @@
                 android:text="@string/btn_delete_oem_captures" />
         </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/btnStorageDetails"
-                style="@style/TonalButtonCell"
-                android:layout_marginEnd="@dimen/button_gap"
-                android:text="@string/btn_storage_details" />
-
-            <Button
-                android:id="@+id/btnSendProbe"
-                style="@style/TonalButtonCell"
-                android:layout_marginEnd="@dimen/button_gap"
-                android:text="@string/btn_send_probe" />
-
-            <Button
-                android:id="@+id/btnTestClip"
-                style="@style/TonalButtonCell"
-                android:text="@string/btn_test_clip" />
-        </LinearLayout>
-
         <TextView
             android:id="@+id/tvStorageDetails"
             android:layout_width="match_parent"
@@ -362,5 +408,14 @@
             android:fontFamily="monospace"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/mono_size" />
+        <TextView
+            android:id="@+id/tvVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/row_gap"
+            android:gravity="end"
+            android:textColor="@color/text_tertiary"
+            android:textSize="@dimen/secondary_text_size" />
+
     </LinearLayout>
 </ScrollView>

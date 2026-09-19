@@ -31,6 +31,7 @@ public final class DashcamSettings {
 
     private static final String KEY_RECORDS_PATH = "recordsPath";
     private static final String KEY_RECORDING_FPS = "recordingFps";
+    private static final String KEY_RECORDING_BITRATE_KBPS = "recordingBitrateKbps";
     private static final String KEY_SIGNATURE = "recordingSignature";
     private static final String KEY_SHOW_SPEED = "recordingShowSpeed";
     private static final String KEY_CAMERA_MASK = "recordingCameraMask";
@@ -41,6 +42,22 @@ public final class DashcamSettings {
     public static final int DEFAULT_RECORDING_FPS = 25;
     public static final int MIN_RECORDING_FPS = 1;
     public static final int MAX_RECORDING_FPS = 60;
+
+    /**
+     * Video bitrate, in kbit/s. Nine megabits is what upstream hardcoded and what a drive was
+     * measured at: about 1.1 MB/s, 58 MB a minute.
+     *
+     * <p>Worth having a hand on, for two reasons. It is the only lever on how hard the USB stick
+     * is being written to, which matters when the same stick is also playing music - a stick that
+     * stalls stalls for everything reading it. And it is the thing to change if a future frame
+     * layout needs more or fewer bits to look the same.
+     *
+     * <p>The floor is low enough to be genuinely gentle on a slow stick, the ceiling high enough
+     * to stop a typo asking the encoder for something it cannot do.
+     */
+    public static final int DEFAULT_RECORDING_BITRATE_KBPS = 9000;
+    public static final int MIN_RECORDING_BITRATE_KBPS = 1000;
+    public static final int MAX_RECORDING_BITRATE_KBPS = 30000;
     private static final int DEFAULT_TEST_RECORD_DURATION_SEC = 30;
     private static final int MIN_TEST_RECORD_DURATION_SEC = 0;
     private static final int MAX_TEST_RECORD_DURATION_SEC = 120;
@@ -78,6 +95,26 @@ public final class DashcamSettings {
 
     public static int getRecordingFps(SharedPreferences prefs) {
         return clampRecordingFps(prefs.getInt(KEY_RECORDING_FPS, DEFAULT_RECORDING_FPS));
+    }
+
+    /** In kbit/s, as the field shows it. */
+    public static int getRecordingBitrateKbps(SharedPreferences prefs) {
+        return clampRecordingBitrateKbps(
+                prefs.getInt(KEY_RECORDING_BITRATE_KBPS, DEFAULT_RECORDING_BITRATE_KBPS));
+    }
+
+    /** In bit/s, as the encoder wants it. */
+    public static int getRecordingBitrateBps(SharedPreferences prefs) {
+        return getRecordingBitrateKbps(prefs) * 1000;
+    }
+
+    public static void setRecordingBitrateKbps(SharedPreferences prefs, int kbps) {
+        prefs.edit().putInt(KEY_RECORDING_BITRATE_KBPS, clampRecordingBitrateKbps(kbps)).apply();
+    }
+
+    public static int clampRecordingBitrateKbps(int kbps) {
+        return Math.max(MIN_RECORDING_BITRATE_KBPS,
+                Math.min(MAX_RECORDING_BITRATE_KBPS, kbps));
     }
 
     public static void setRecordingFps(SharedPreferences prefs, int fps) {
