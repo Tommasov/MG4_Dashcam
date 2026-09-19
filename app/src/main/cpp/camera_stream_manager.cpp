@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <ctime>
 #include <cstdio>
+#include <cerrno>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -139,14 +140,126 @@ namespace camera_stream_manager
         long long gComposedFrames = 0;
         int64_t gComposedFirstUs = 0;
 
-        void countFrame(int videoIndex, int64_t nowUs)
+        /**
+         * What the driver captured while we were not looking.
+         *
+         * <p>Counting our own dequeues says how many frames we got, never how many there were.
+         * The driver stamps every captured frame with a sequence number, so the gap between one
+         * dequeue's number and the next is exactly the frames it filled and we never collected.
+         * That single figure settles whether the cameras are slow or we are: a device handing
+         * over nine frames a second with no gaps is a slow device, and one with sixteen missing
+         * is a fast device and a slow reader.
+         */
+        std::map<int, unsigned> gLastSequence;
+        std::map<int, long long> gMissedFrames;
+        /** Time between collecting a buffer and giving it back, in microseconds. */
+        std::map<int, long long> gWorkUs;
+        /** Time spent waiting for a buffer to arrive. */
+        std::map<int, long long> gWaitUs;
+
+        /**
+         * When the last frame arrived, not when the report was asked for.
+         *
+         * <p>Dividing by "now minus the first frame" quietly counted everything that happened
+         * after the recording stopped - walking back to the laptop, opening the app, pressing
+         * the button. On a twenty-second run that was a third of the denominator, and every
+         * rate printed here was wrong by that much, always low.
+         */
+        std::map<int, int64_t> gFrameLastUs;
+        int64_t gComposedLastUs = 0;
+
+        void countFrame(int videoIndex, int64_t nowUs, unsigned sequence)
         {
             std::lock_guard<std::mutex> lock(gRateMutex);
+            gFrameLastUs[videoIndex] = nowUs;
             if (gFrameCounts[videoIndex] == 0)
             {
                 gFrameFirstUs[videoIndex] = nowUs;
             }
+            else
+            {
+                const unsigned previous = gLastSequence[videoIndex];
+                if (sequence > previous + 1)
+                {
+                    gMissedFrames[videoIndex] += sequence - previous - 1;
+                }
+            }
+            gLastSequence[videoIndex] = sequence;
             gFrameCounts[videoIndex]++;
+        }
+
+        /** The whole turn of the loop, so that what the two other figures miss is visible. */
+        std::map<int, long long> gLoopUs;
+        /** Turns of the loop where select() gave nothing: time that no other figure counts. */
+        std::map<int, long long> gEmptyCount;
+        std::map<int, long long> gEmptyUs;
+
+        void countEmptySelect(int videoIndex, long long us)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gEmptyCount[videoIndex]++;
+            gEmptyUs[videoIndex] += us;
+        }
+
+        /** Where the encoder thread's time goes, one figure per stage. */
+        long long gSnapUs = 0, gFooterUs = 0, gFeedUs = 0, gDrainUs = 0, gEncodeCount = 0;
+
+        /** Asked for, and actually got: a sleep on a loaded system is a lower bound. */
+        long long gSleepAskedUs = 0, gSleepGotUs = 0, gSleepCount = 0;
+
+        void countSleep(long long askedUs, long long gotUs)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gSleepAskedUs += askedUs;
+            gSleepGotUs += gotUs;
+            gSleepCount++;
+        }
+
+        /** What showing the grid costs, now that it is off the encoder's thread. */
+        long long gPreviewUs = 0, gPreviewCount = 0;
+
+        void countPreview(long long us)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gPreviewUs += us;
+            gPreviewCount++;
+        }
+
+        void countEncodeStages(long long snapUs, long long footerUs, long long feedUs,
+                               long long drainUs)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gSnapUs += snapUs;
+            gFooterUs += footerUs;
+            gFeedUs += feedUs;
+            gDrainUs += drainUs;
+            gEncodeCount++;
+        }
+
+        void countTimings(int videoIndex, long long workUs, long long waitUs, long long loopUs)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gWorkUs[videoIndex] += workUs;
+            gWaitUs[videoIndex] += waitUs;
+            gLoopUs[videoIndex] += loopUs;
+        }
+
+        /**
+         * How long the one sequential read of the mapped camera buffer takes.
+         *
+         * <p>If this is most of the per-frame budget, the cost is the memory the buffer lives
+         * in and no rearranging of our own code will touch it - the answer would be to read it
+         * once and never again, which is what we now do, or not to read it at all, which is
+         * what the factory hardware path does.
+         */
+        long long gCopyUs = 0;
+        long long gCopyCount = 0;
+
+        void countCopyUs(long long us)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gCopyUs += us;
+            gCopyCount++;
         }
 
         void countComposedFrame(int64_t nowUs)
@@ -156,6 +269,7 @@ namespace camera_stream_manager
             {
                 gComposedFirstUs = nowUs;
             }
+            gComposedLastUs = nowUs;
             gComposedFrames++;
         }
 
@@ -163,6 +277,14 @@ namespace camera_stream_manager
         {
             std::lock_guard<std::mutex> lock(gFormatMutex);
             gFormats[videoIndex] = line;
+        }
+
+        /** A further line under a device's format line, for what the driver says about itself. */
+        void appendFormatDetail(int videoIndex, const std::string &line)
+        {
+            std::lock_guard<std::mutex> lock(gFormatMutex);
+            gFormats[videoIndex] += "\n";
+            gFormats[videoIndex] += line;
         }
 
         std::string errnoStr()
@@ -634,6 +756,24 @@ namespace camera_stream_manager
         public:
             virtual ~FrameConsumer() = default;
             virtual void processFrame(const cv::Mat &rgbaFrame) = 0;
+
+            /**
+             * Whether this consumer would rather have the camera buffer as it came off the
+             * device, UYVY and untouched.
+             *
+             * <p>The capture loop used to convert every frame to RGBA before handing it on,
+             * because that is what every consumer wanted. The combined recorder does not: it
+             * writes NV12, and going UYVY -> RGBA -> I420 -> NV12 moved more than a gigabyte a
+             * second on four cameras and cost half the frame rate. A consumer that says yes here
+             * gets the packed buffer instead, and the RGBA conversion is skipped entirely when
+             * nobody else asks for it.
+             */
+            virtual bool wantsPackedFrame() const { return false; }
+
+            /** The camera buffer, cropped, still in its capture format. Only called when
+             *  {@link #wantsPackedFrame} returns true. */
+            virtual void processPackedFrame(const cv::Mat & /*packedFrame*/) {}
+
             virtual void requestStop() = 0;
             virtual bool isStopRequested() const = 0;
             virtual bool isFinalized() const = 0;
@@ -713,6 +853,21 @@ namespace camera_stream_manager
         class CombinedRecordingSink : public std::enable_shared_from_this<CombinedRecordingSink>
         {
         public:
+            /**
+             * Per-camera scratch, so the slow read of the mapped buffer and the splitting into
+             * planes both happen outside every lock and without fighting the other cameras.
+             */
+            struct CellStaging
+            {
+                cv::Mat packed;    // a cached copy of the camera's buffer
+                cv::Mat luma;      // Y as captured
+                cv::Mat lumaFull;  // Y at cell height
+                cv::Mat chromaU;
+                cv::Mat chromaV;
+                cv::Mat chroma;    // U and V interleaved, as NV12 wants them
+            };
+            std::array<CellStaging, 4> staging_{};
+
             CombinedRecordingSink(std::string outputPath, int cellWidth, int cellHeight, int fps, int bitrate,
                                   std::string signature, bool showSpeed)
                 : outputPath_(std::move(outputPath)),
@@ -755,12 +910,12 @@ namespace camera_stream_manager
             /**
              * Shows the composed canvas on a Surface, live.
              *
-             * <p>Takes the encoder lock because the canvas is written under it, and a preview
-             * window that changed mid-compose would be read after being released.
+             * <p>Has a lock of its own: the surface is touched by the encoder thread, and a
+             * window that changed mid-post would be read after being released.
              */
             void setPreviewWindow(ANativeWindow *window)
             {
-                std::lock_guard<std::mutex> lock(encoderMutex_);
+                std::lock_guard<std::mutex> lock(previewMutex_);
                 if (previewWindow_ != nullptr)
                 {
                     ANativeWindow_release(previewWindow_);
@@ -793,7 +948,7 @@ namespace camera_stream_manager
             /** Hands the window over without releasing it: the next composer will own it. */
             ANativeWindow *takePreviewWindow()
             {
-                std::lock_guard<std::mutex> lock(encoderMutex_);
+                std::lock_guard<std::mutex> lock(previewMutex_);
                 ANativeWindow *window = previewWindow_;
                 previewWindow_ = nullptr;
                 return window;
@@ -801,52 +956,112 @@ namespace camera_stream_manager
 
             bool hasPreviewWindow()
             {
-                std::lock_guard<std::mutex> lock(encoderMutex_);
+                std::lock_guard<std::mutex> lock(previewMutex_);
                 return previewWindow_ != nullptr;
             }
 
             /**
              * How often the preview is refreshed, at most.
              *
-             * <p>Posting it costs a copy of the whole canvas - six megabytes now that the grid is
-             * 1440x1040 - and the copy happens on a capture thread, which is not rewarding the
-             * V4L2 buffer to the driver while it runs. At the recording rate that is 150 MB/s of
-             * memcpy stealing time from the cameras, which is why the preview was never smooth
-             * even before the deinterlacing was added.
+             * <p>This was twelve a second, set when posting the preview ran on a capture thread
+             * and every post held a V4L2 buffer back from the driver. It was the right trade
+             * then and it was also the answer to "why is the preview always stuttery": it was
+             * stuttery because it was told to be, and no amount of work elsewhere was going to
+             * change that.
              *
-             * <p>Twelve a second is plenty for judging a layout and for seeing that the cameras
-             * are alive, and it halves what the capture threads give up for it.
+             * <p>The preview has its own thread now and takes its own copy of the canvas, so it
+             * costs the cameras and the encoder nothing. There is no reason left to show less
+             * than what is being recorded.
              */
-            static constexpr int64_t PREVIEW_INTERVAL_US = 1000000 / 12;
+            static constexpr int64_t PREVIEW_INTERVAL_US = 1000000 / 25;
 
-            void postCanvasToPreviewLocked()
+            /**
+             * Shows the snapshot the encoder is about to use, so the preview needs neither the
+             * canvas lock nor a second conversion.
+             */
+            /**
+             * The preview runs on its own thread, and this is not a tidiness question.
+             *
+             * <p>It used to be posted from the encoder thread, between two stopwatches and so
+             * invisible to both. Measured afterwards: 23 ms a frame, which held the recording
+             * to 15.9 fps while the cameras were delivering 23.5. Watching the grid was slowing
+             * down the recording of it - and making the preview itself look worse, which is
+             * what it was being judged on.
+             */
+            void previewLoop()
             {
-                if (previewWindow_ == nullptr || rgbaCanvas_.empty())
+                while (!stopRequested_.load() && !isFinalized())
+                {
+                    if (!hasPreviewWindow())
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        continue;
+                    }
+                    const int64_t startedUs = nowUs();
+                    postPreviewFrame();
+                    const int64_t spentUs = nowUs() - startedUs;
+                    countPreview(spentUs);
+                    if (spentUs < PREVIEW_INTERVAL_US)
+                    {
+                        std::this_thread::sleep_for(
+                            std::chrono::microseconds(PREVIEW_INTERVAL_US - spentUs));
+                    }
+                }
+            }
+
+            void postPreviewFrame()
+            {
+                {
+                    std::lock_guard<std::mutex> lock(canvasMutex_);
+                    if (nv12Canvas_.empty())
+                    {
+                        return;
+                    }
+                    nv12Canvas_.copyTo(previewSnapshot_);
+                }
+
+                std::lock_guard<std::mutex> lock(previewMutex_);
+                if (previewWindow_ == nullptr)
                 {
                     return;
                 }
-                const int64_t now = nowUs();
-                if (now - lastPreviewUs_ < PREVIEW_INTERVAL_US)
-                {
-                    return;
-                }
-                lastPreviewUs_ = now;
+                lastPreviewUs_ = nowUs();
+                // The one place RGBA is still needed, and the only one that pays for it: a
+                // surface wants it, and only while somebody is looking, twelve times a second.
+                cv::cvtColor(previewSnapshot_, rgbaPreview_, cv::COLOR_YUV2RGBA_NV12);
                 ANativeWindow_Buffer out{};
                 if (ANativeWindow_lock(previewWindow_, &out, nullptr) != 0)
                 {
                     return;
                 }
-                const int rows = std::min(rgbaCanvas_.rows, out.height);
-                const int cols = std::min(rgbaCanvas_.cols, out.width);
-                const int srcStride = static_cast<int>(rgbaCanvas_.step[0]);
+                const int rows = std::min(rgbaPreview_.rows, out.height);
+                const int cols = std::min(rgbaPreview_.cols, out.width);
+                const int srcStride = static_cast<int>(rgbaPreview_.step[0]);
                 const int dstStride = out.stride * 4;
                 uint8_t *dst = static_cast<uint8_t *>(out.bits);
                 for (int row = 0; row < rows; row++)
                 {
-                    std::memcpy(dst + row * dstStride, rgbaCanvas_.data + row * srcStride,
+                    std::memcpy(dst + row * dstStride, rgbaPreview_.data + row * srcStride,
                                 static_cast<size_t>(cols) * 4U);
                 }
                 ANativeWindow_unlockAndPost(previewWindow_);
+            }
+
+            /**
+             * The canvas, as NV12: a full-size luma plane with a half-height interleaved chroma
+             * plane below it, in one allocation so the whole thing is one memcpy to the codec.
+             *
+             * <p>Started at mid grey rather than black. Nothing should ever show through - the
+             * four quarters cover every pixel above the footer - but a camera that has not
+             * delivered its first frame yet leaves its quarter untouched, and a flat grey says
+             * "nothing here yet" where zeroed chroma would say "lurid green".
+             */
+            void allocateCanvas()
+            {
+                nv12Canvas_.create(totalHeight_ + (totalHeight_ / 2), gridWidth_, CV_8UC1);
+                nv12Canvas_(cv::Rect(0, 0, gridWidth_, totalHeight_)).setTo(cv::Scalar(16));
+                nv12Canvas_(cv::Rect(0, totalHeight_, gridWidth_, totalHeight_ / 2))
+                    .setTo(cv::Scalar(128));
             }
 
             bool initialize()
@@ -860,15 +1075,13 @@ namespace camera_stream_manager
                 if (!isRecording())
                 {
                     // Preview only: no codec, no muxer, no file. Just the canvas to draw on.
-                    rgbaCanvas_.create(totalHeight_, gridWidth_, CV_8UC4);
-                    rgbaCanvas_.setTo(cv::Scalar(0, 0, 0, 255));
-                    for (cv::Mat &frame : latestFrames_)
-                    {
-                        frame.create(cellHeight_, cellWidth_, CV_8UC4);
-                        frame.setTo(cv::Scalar(0, 0, 0, 255));
-                    }
+                    allocateCanvas();
+                    encoderFrame_.resize(
+                        static_cast<size_t>(gridWidth_) * static_cast<size_t>(totalHeight_) * 3U / 2U);
+                    frameDurationUs_ = 1000000LL / std::max(1, fps_);
                     startUs_ = nowUs();
                     nextPtsUs_ = 0;
+                    startEncoderThread();
                     logi("combined preview %dx%d", gridWidth_, totalHeight_);
                     return true;
                 }
@@ -894,18 +1107,13 @@ namespace camera_stream_manager
                     return false;
                 }
 
-                rgbaCanvas_.create(totalHeight_, gridWidth_, CV_8UC4);
-                i420Frame_.create(totalHeight_ + (totalHeight_ / 2), gridWidth_, CV_8UC1);
+                allocateCanvas();
                 encoderFrame_.resize(static_cast<size_t>(gridWidth_) * static_cast<size_t>(totalHeight_) * 3U / 2U);
-                for (cv::Mat &frame : latestFrames_)
-                {
-                    frame.create(cellHeight_, cellWidth_, CV_8UC4);
-                    frame.setTo(cv::Scalar(0, 0, 0, 255));
-                }
                 frameDurationUs_ = 1000000LL / std::max(1, fps_);
                 startUs_ = nowUs();
                 nextPtsUs_ = 0;
                 frameCount_ = 0;
+                startEncoderThread();
                 logi("combined encoder color format=%d size=%dx%d", encoderColorFormat_, gridWidth_, totalHeight_);
                 return true;
             }
@@ -937,66 +1145,182 @@ namespace camera_stream_manager
                 currentSpeedKmh_.store(std::max(0, speedKmh));
             }
 
-            void processSourceFrame(int sourceIndex, const cv::Mat &rgbaFrame)
+            /**
+             * A camera has a frame. Copy it into its quarter and get out.
+             *
+             * <p>This used to compose, convert and encode inline, holding one mutex for all four
+             * cameras - and it did it while still holding the V4L2 buffer, because the capture
+             * loop only gives the buffer back when the consumer returns. Measured on the car:
+             * 1.1 ms waiting for a frame and 72.3 ms holding one. The device was never slow. It
+             * was idle, out of buffers, waiting for us.
+             *
+             * <p>So the encoder lives on its own thread now and this does the one thing that has
+             * to happen in the camera's own time: write the pixels down.
+             */
+            void processSourcePackedFrame(int sourceIndex, const cv::Mat &packedFrame)
             {
-                if (sourceIndex < 0 || sourceIndex >= 4 || rgbaFrame.empty() || isFinalized() || stopRequested_.load())
+                if (sourceIndex < 0 || sourceIndex >= 4 || packedFrame.empty() || isFinalized() || stopRequested_.load())
                 {
                     return;
                 }
-                if (rgbaFrame.cols < cellWidth_ || rgbaFrame.rows <= 0)
+                if (packedFrame.cols < cellWidth_ || packedFrame.rows <= 0)
                 {
                     return;
                 }
 
+                // The V4L2 buffer is device memory, and on this SoC it is not cached: every
+                // read of it costs many times what the same read from ordinary memory would.
+                // One sequential copy, taken before any lock, and everything after this works
+                // on cached bytes.
+                //
+                // This is what the last two builds got wrong. Writing NV12 straight from the
+                // mapped buffer replaced one pass over it (a single cvtColor) with three - luma,
+                // then U, then V - and did them holding the canvas lock. Total memory traffic
+                // went down sixfold and the frame rate did not move, because the traffic that
+                // mattered was the slow kind.
+                const int64_t copyStartUs = nowUs();
+                CellStaging &staging = staging_[sourceIndex];
+                const int srcRows = std::min(packedFrame.rows, cellHeight_);
+                packedFrame(cv::Rect(0, 0, cellWidth_, srcRows)).copyTo(staging.packed);
+                countCopyUs(nowUs() - copyStartUs);
+
+                prepareCell(staging, srcRows);
+
+                std::lock_guard<std::mutex> lock(canvasMutex_);
+                if (isFinalized() || stopRequested_.load())
+                {
+                    return;
+                }
+                writeCellLocked(sourceIndex, staging);
+            }
+
+            /** Splits the packed pairs into the two planes NV12 wants. No lock: per camera. */
+            void prepareCell(CellStaging &staging, int srcRows)
+            {
+                cv::extractChannel(staging.packed, staging.luma, 1);
+                if (staging.luma.rows != cellHeight_)
+                {
+                    // A field arriving at half the cell height is stretched to fill it.
+                    // Bilinear on purpose: there is no detail to recover here, and a sharper
+                    // filter would only invent edges for the encoder to pay for.
+                    cv::resize(staging.luma, staging.lumaFull,
+                               cv::Size(cellWidth_, cellHeight_), 0, 0, cv::INTER_LINEAR);
+                }
+                else
+                {
+                    staging.lumaFull = staging.luma;
+                }
+
+                // Read four bytes at a time the packed pairs are [U, Y, V, Y], so chroma comes
+                // out as two half-width planes. NV12 wants them interleaved, one row per two
+                // picture rows - and a 240-line field stretched over 480 lines leaves exactly
+                // one source row per chroma row, so there is nothing to resample.
+                cv::Mat quads(srcRows, cellWidth_ / 2, CV_8UC4,
+                              staging.packed.data, staging.packed.step[0]);
+                cv::extractChannel(quads, staging.chromaU, 0);
+                cv::extractChannel(quads, staging.chromaV, 2);
+                cv::merge(std::vector<cv::Mat>{staging.chromaU, staging.chromaV}, staging.chroma);
+            }
+
+            /**
+             * Takes a copy of the canvas for the encoder, then writes the footer onto the copy.
+             *
+             * <p>The footer used to be drawn into the canvas itself, which meant holding the
+             * canvas lock through a setTo, a line and two putText calls while four cameras
+             * waited to write their quarters. It belongs to the frame being sent, not to the
+             * shared canvas, and the strip it occupies is below every camera's quarter - so
+             * drawing it here costs the same and blocks nobody.
+             */
+            void snapshotCanvas(std::vector<uint8_t> &into, long long &snapUs, long long &footerUs)
+            {
+                const int64_t t0 = nowUs();
+                {
+                    std::lock_guard<std::mutex> lock(canvasMutex_);
+                    std::memcpy(into.data(), nv12Canvas_.data, into.size());
+                }
+                const int64_t t1 = nowUs();
+                cv::Mat frame(totalHeight_ + (totalHeight_ / 2), gridWidth_, CV_8UC1, into.data());
+                drawFooter(frame);
+                snapUs = t1 - t0;
+                footerUs = nowUs() - t1;
+            }
+
+            /**
+             * One thread paces the output, so the cameras never wait for the codec.
+             *
+             * <p>It also means the recording holds its frame rate when a camera stalls: the
+             * canvas is still there, still current for the other three, and the clock in the
+             * footer keeps moving.
+             */
+            void startEncoderThread()
+            {
+                // Weak, not strong. A thread holding a shared_ptr to its own owner keeps that
+                // owner alive for as long as it runs, and the owner's destructor is what stops
+                // the thread: the two would wait for each other forever.
+                std::weak_ptr<CombinedRecordingSink> weak = shared_from_this();
+                encoderThread_ = std::thread([weak]()
+                                             {
+                    if (auto self = weak.lock())
+                    {
+                        self->encodeLoop();
+                    } });
+                previewThread_ = std::thread([weak]()
+                                             {
+                    if (auto self = weak.lock())
+                    {
+                        self->previewLoop();
+                    } });
+            }
+
+            void encodeLoop()
+            {
+                while (!stopRequested_.load() && !isFinalized())
+                {
+                    const int64_t elapsedUs = nowUs() - startUs_;
+                    const int64_t owedUs = nextPtsUs_ - elapsedUs;
+                    if (owedUs > 0)
+                    {
+                        // One sleep to the deadline, not eight short ones. Every sleep on a
+                        // loaded system wakes late, and waking late eight times over costs
+                        // eight times as much as waking late once.
+                        {
+                            std::lock_guard<std::mutex> lock(encoderMutex_);
+                            drainEncoderLocked(0);
+                        }
+                        const int64_t beforeUs = nowUs();
+                        std::this_thread::sleep_for(std::chrono::microseconds(owedUs));
+                        countSleep(owedUs, nowUs() - beforeUs);
+                        continue;
+                    }
+                    encodeOneFrame();
+                }
+            }
+
+            void encodeOneFrame()
+            {
+                long long snapUs = 0;
+                long long footerUs = 0;
+                snapshotCanvas(encoderFrame_, snapUs, footerUs);
+                countComposedFrame(nowUs());
+
+                const int64_t feedStartUs = nowUs();
                 std::lock_guard<std::mutex> lock(encoderMutex_);
                 if (isFinalized() || stopRequested_.load())
                 {
                     return;
                 }
-
-                // No mirroring here, deliberately. Upstream flips the rear view horizontally to
-                // match what a driver expects from a mirror, which is right when reversing and
-                // wrong in an archive: it reverses every number plate behind you.
-                cv::Mat rgbaCrop = rgbaFrame(cv::Rect(0, 0, cellWidth_,
-                                                      std::min(rgbaFrame.rows, cellHeight_)));
-                if (rgbaCrop.rows == cellHeight_)
-                {
-                    rgbaCrop.copyTo(latestFrames_[sourceIndex]);
-                }
-                else
-                {
-                    // A field arriving at half the cell height is stretched to fill it. Bilinear
-                    // on purpose: there is no detail to recover here, and a sharper filter would
-                    // only invent edges for the encoder to pay for.
-                    cv::resize(rgbaCrop, latestFrames_[sourceIndex],
-                               cv::Size(cellWidth_, cellHeight_), 0, 0, cv::INTER_LINEAR);
-                }
-
-                const int64_t elapsedUs = nowUs() - startUs_;
-                if (elapsedUs < nextPtsUs_)
-                {
-                    drainEncoderLocked(0);
-                    return;
-                }
-
-                composeCanvasLocked();
-                countComposedFrame(nowUs());
-                postCanvasToPreviewLocked();
                 if (!isRecording())
                 {
-                    // Nothing downstream of the canvas. The pts gate above still paces us, so a
-                    // preview costs the same composition as a recording and nothing more.
+                    // Preview only. The pts gate still paces us, so a preview costs the same
+                    // snapshot as a recording and nothing more.
                     nextPtsUs_ += frameDurationUs_;
                     return;
                 }
-                cv::cvtColor(rgbaCanvas_, i420Frame_, cv::COLOR_RGBA2YUV_I420);
-                if (encoderColorFormat_ == COLOR_FORMAT_YUV420_SEMIPLANAR)
+                if (encoderColorFormat_ != COLOR_FORMAT_YUV420_SEMIPLANAR)
                 {
-                    packI420ToNv12(i420Frame_.data, encoderFrame_.data(), gridWidth_, totalHeight_);
-                }
-                else
-                {
-                    std::memcpy(encoderFrame_.data(), i420Frame_.data, encoderFrame_.size());
+                    // This encoder wants the chroma split apart. Done in place on the snapshot,
+                    // which nobody else is looking at.
+                    packNv12ToI420InPlace(encoderFrame_, gridWidth_, totalHeight_);
                 }
 
                 ssize_t inputIndex = AMediaCodec_dequeueInputBuffer(codec_, 10000);
@@ -1027,8 +1351,17 @@ namespace camera_stream_manager
                         requestStop();
                     }
                 }
+                else
+                {
+                    // The codec has nothing free. Nothing was consumed, so the pts gate has not
+                    // moved and this loop would spin on it; give the encoder a frame's grace.
+                    std::this_thread::sleep_for(std::chrono::microseconds(2000));
+                }
 
+                const int64_t drainStartUs = nowUs();
                 drainEncoderLocked(0);
+                countEncodeStages(snapUs, footerUs, drainStartUs - feedStartUs,
+                                  nowUs() - drainStartUs);
             }
 
             void finalize()
@@ -1036,6 +1369,25 @@ namespace camera_stream_manager
                 if (finalized_.exchange(true))
                 {
                     return;
+                }
+
+                // The encoder thread reads the codec on every pass: it has to be gone before
+                // the codec is. It cannot be this thread - finalize() is called from outside -
+                // but check anyway rather than deadlock if that ever changes.
+                for (std::thread *worker : {&encoderThread_, &previewThread_})
+                {
+                    if (!worker->joinable())
+                    {
+                        continue;
+                    }
+                    if (worker->get_id() == std::this_thread::get_id())
+                    {
+                        worker->detach();
+                    }
+                    else
+                    {
+                        worker->join();
+                    }
                 }
 
                 std::lock_guard<std::mutex> lock(encoderMutex_);
@@ -1142,36 +1494,124 @@ namespace camera_stream_manager
                 encoderColorFormat_ = COLOR_FORMAT_YUV420_PLANAR;
             }
 
-            void composeCanvasLocked()
+            /**
+             * Where each camera's quarter sits. Front and rear share the top row because that is
+             * the pair worth reading together when working out who came from where; left and
+             * right go below, each on the side it belongs to.
+             */
+            void cellOriginLocked(int sourceIndex, int &x, int &y) const
             {
-                // A 2x2 grid, every cell at the shape its camera actually has.
-                //
-                // The old layout stood the side cameras on end and stacked front and rear between
-                // them, which left 18% of every frame black and squashed all four views - the
-                // centre ones vertically, the sides horizontally once rotated. Nothing about that
-                // was chosen for a recording: the cell size came from upstream's full-screen
-                // single-camera view, and the grid was assembled out of whatever shape that left.
-                //
-                // Front and rear sit side by side because that is the pair worth reading together
-                // when working out who came from where. Left and right go below, each on the side
-                // it belongs to.
-                rgbaCanvas_.setTo(cv::Scalar(0, 0, 0, 255));
-                latestFrames_[0].copyTo(rgbaCanvas_(cv::Rect(0, 0, cellWidth_, cellHeight_)));
-                latestFrames_[3].copyTo(rgbaCanvas_(cv::Rect(cellWidth_, 0, cellWidth_, cellHeight_)));
-                latestFrames_[2].copyTo(rgbaCanvas_(cv::Rect(0, cellHeight_, cellWidth_, cellHeight_)));
-                latestFrames_[1].copyTo(rgbaCanvas_(cv::Rect(cellWidth_, cellHeight_, cellWidth_, cellHeight_)));
-                drawFooterLocked();
+                switch (sourceIndex)
+                {
+                case 0:  x = 0;          y = 0;           break;  // front
+                case 3:  x = cellWidth_; y = 0;           break;  // rear
+                case 2:  x = 0;          y = cellHeight_; break;  // left
+                default: x = cellWidth_; y = cellHeight_; break;  // right
+                }
             }
 
-            void drawFooterLocked()
+            /**
+             * Writes one camera's buffer straight into its quarter of the NV12 canvas.
+             *
+             * <p>This replaces a chain that went UYVY -> RGBA in the capture thread, RGBA ->
+             * a per-camera holding frame, four holding frames -> an RGBA canvas, canvas -> I420,
+             * I420 -> NV12, and finally NV12 -> the codec. Six passes over full frames, more
+             * than a gigabyte a second across four cameras, and the measured cost was half the
+             * frame rate. UYVY and NV12 are both YCbCr; nothing in between needed to exist.
+             *
+             * <p>No mirroring, deliberately. Upstream flips the rear view horizontally to match
+             * what a driver expects from a mirror, which is right when reversing and wrong in an
+             * archive: it reverses every number plate behind you.
+             */
+            /** All that happens under the lock: two copies into the canvas planes. */
+            void writeCellLocked(int sourceIndex, const CellStaging &staging)
             {
-                cv::Rect footerRect(0, gridHeight_, gridWidth_, footerHeight_);
-                cv::Mat footer = rgbaCanvas_(footerRect);
-                footer.setTo(cv::Scalar(14, 14, 14, 255));
-                cv::line(rgbaCanvas_,
+                int x = 0;
+                int y = 0;
+                cellOriginLocked(sourceIndex, x, y);
+
+                staging.lumaFull.copyTo(nv12Canvas_(cv::Rect(x, y, cellWidth_, cellHeight_)));
+
+                cv::Mat destBytes = nv12Canvas_(
+                    cv::Rect(x, totalHeight_ + (y / 2), cellWidth_, cellHeight_ / 2));
+                cv::Mat dest(destBytes.rows, destBytes.cols / 2, CV_8UC2,
+                             destBytes.data, destBytes.step[0]);
+                if (staging.chroma.rows == dest.rows)
+                {
+                    staging.chroma.copyTo(dest);
+                }
+                else
+                {
+                    cv::resize(staging.chroma, dest, dest.size(), 0, 0, cv::INTER_NEAREST);
+                }
+            }
+
+            /** For the encoders that ask for planar I420 instead: split the interleaved chroma. */
+            static void packNv12ToI420InPlace(std::vector<uint8_t> &frame, int width, int height)
+            {
+                const size_t ySize = static_cast<size_t>(width) * static_cast<size_t>(height);
+                const size_t pairs = ySize / 4;
+                std::vector<uint8_t> chroma(frame.begin() + static_cast<long>(ySize), frame.end());
+                uint8_t *u = frame.data() + ySize;
+                uint8_t *v = u + pairs;
+                for (size_t i = 0; i < pairs; i++)
+                {
+                    u[i] = chroma[2 * i];
+                    v[i] = chroma[2 * i + 1];
+                }
+            }
+
+            // A 2x2 grid, every cell at the shape its camera actually has. The old layout stood
+            // the side cameras on end and stacked front and rear between them, which left 18% of
+            // every frame black and squashed all four views - the centre ones vertically, the
+            // sides horizontally once rotated. Nothing about that was chosen for a recording:
+            // the cell size came from upstream's full-screen single-camera view, and the grid
+            // was assembled out of whatever shape that left.
+            //
+            // There is no compose step any more. Each camera writes into its own quarter as its
+            // frame arrives, so the canvas is always current and nothing is copied twice. It is
+            // never cleared either: the four quarters cover every pixel above the footer, and
+            // clearing 1040 rows to black only to overwrite them was 150 MB a second.
+
+            /**
+             * The footer, cached.
+             *
+             * <p>It costs 4.3 ms to draw - half of everything the encoder thread does - and its
+             * only moving part is a clock reading whole seconds. So it is drawn when the second
+             * changes and copied the other twenty-four times.
+             */
+            void drawFooter(cv::Mat &frame)
+            {
+                const std::time_t second = std::time(nullptr);
+                cv::Rect luma(0, gridHeight_, gridWidth_, footerHeight_);
+                cv::Rect chroma(0, totalHeight_ + (gridHeight_ / 2), gridWidth_, footerHeight_ / 2);
+                if (footerSecond_ != second || footerCache_.empty())
+                {
+                    footerSecond_ = second;
+                    footerCache_.create(footerHeight_ + (footerHeight_ / 2), gridWidth_, CV_8UC1);
+                    renderFooter(frame);
+                    frame(luma).copyTo(footerCache_(cv::Rect(0, 0, gridWidth_, footerHeight_)));
+                    frame(chroma).copyTo(
+                        footerCache_(cv::Rect(0, footerHeight_, gridWidth_, footerHeight_ / 2)));
+                    return;
+                }
+                footerCache_(cv::Rect(0, 0, gridWidth_, footerHeight_)).copyTo(frame(luma));
+                footerCache_(cv::Rect(0, footerHeight_, gridWidth_, footerHeight_ / 2))
+                    .copyTo(frame(chroma));
+            }
+
+            void renderFooter(cv::Mat &frame)
+            {
+                frame(cv::Rect(0, gridHeight_, gridWidth_, footerHeight_))
+                    .setTo(cv::Scalar(FOOTER_LUMA));
+                // Neutral chroma for the strip, so the grey stays grey.
+                frame(cv::Rect(0, totalHeight_ + (gridHeight_ / 2),
+                                     gridWidth_, footerHeight_ / 2))
+                    .setTo(cv::Scalar(128));
+                cv::line(frame,
                          cv::Point(0, gridHeight_),
                          cv::Point(gridWidth_, gridHeight_),
-                         cv::Scalar(70, 70, 70, 255),
+                         cv::Scalar(RULE_LUMA),
                          2,
                          cv::LINE_AA);
 
@@ -1179,11 +1619,11 @@ namespace camera_stream_manager
                 const double fontScale = 0.78;
                 const int thickness = 2;
                 const int marginX = 24;
-                const cv::Scalar textColor(235, 235, 235, 255);
+                const cv::Scalar textColor(TEXT_LUMA);
 
                 if (!signature_.empty())
                 {
-                    cv::putText(rgbaCanvas_,
+                    cv::putText(frame,
                                 signature_,
                                 cv::Point(marginX, baselineY),
                                 cv::FONT_HERSHEY_SIMPLEX,
@@ -1201,7 +1641,7 @@ namespace camera_stream_manager
                     fontScale,
                     thickness,
                     &baseline);
-                cv::putText(rgbaCanvas_,
+                cv::putText(frame,
                             rightText,
                             cv::Point(std::max(marginX, gridWidth_ - marginX - textSize.width), baselineY),
                             cv::FONT_HERSHEY_SIMPLEX,
@@ -1338,13 +1778,35 @@ namespace camera_stream_manager
             bool muxerStarted_ = false;
             bool eosQueued_ = false;
 
+            // Footer shades, as luma. OpenCV writes studio-range Y, so these are the values the
+            // RGBA footer used to end up with once converted: 14, 70 and 235 grey.
+            static constexpr uint8_t FOOTER_LUMA = 28;
+            static constexpr uint8_t RULE_LUMA = 76;
+            static constexpr uint8_t TEXT_LUMA = 218;
+
+            cv::Mat previewSnapshot_;
+            std::thread previewThread_;
+            cv::Mat footerCache_;
+            std::time_t footerSecond_ = 0;
+
+            /** Guards the codec and the muxer. Only the encoder thread takes it in anger. */
             std::mutex encoderMutex_;
-            cv::Mat rgbaCanvas_;
-            /** Where the composed canvas is also shown, when somebody is looking. */
+            /** Guards the canvas: four camera threads write it, the encoder thread copies it. */
+            std::mutex canvasMutex_;
+            /** Guards the preview surface, which outlives neither of the other two. */
+            std::mutex previewMutex_;
+            std::thread encoderThread_;
+            /** The frame itself, NV12, written in place by the cameras and copied to the codec. */
+            cv::Mat nv12Canvas_;
+            /** Where the canvas is also shown, when somebody is looking. */
             ANativeWindow *previewWindow_ = nullptr;
             int64_t lastPreviewUs_ = 0;
-            cv::Mat i420Frame_;
-            std::array<cv::Mat, 4> latestFrames_{};
+            /** Only allocated while a preview surface is attached. */
+            cv::Mat rgbaPreview_;
+            cv::Mat lumaCell_;
+            cv::Mat chromaU_;
+            cv::Mat chromaV_;
+            cv::Mat chromaPair_;
             std::vector<uint8_t> encoderFrame_;
             std::atomic<int> currentSpeedKmh_{0};
 
@@ -1363,11 +1825,16 @@ namespace camera_stream_manager
             {
             }
 
-            void processFrame(const cv::Mat &rgbaFrame) override
+            /** Never called: this tap asks for the packed buffer instead. */
+            void processFrame(const cv::Mat & /*rgbaFrame*/) override {}
+
+            bool wantsPackedFrame() const override { return true; }
+
+            void processPackedFrame(const cv::Mat &packedFrame) override
             {
                 if (sink_ != nullptr)
                 {
-                    sink_->processSourceFrame(sourceIndex_, rgbaFrame);
+                    sink_->processSourcePackedFrame(sourceIndex_, packedFrame);
                 }
             }
 
@@ -1711,6 +2178,35 @@ namespace camera_stream_manager
                     rememberFormat(videoIndex_, line);
                 }
 
+                {
+                    // What rate the device thinks it runs at, and whether that is ours to set.
+                    // We have never asked: the frame interval has been whatever the driver came
+                    // up with, and the factory app is getting 25 fps out of the same hardware.
+                    v4l2_streamparm parm{};
+                    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                    char line[160];
+                    if (ioctl(fd_, VIDIOC_G_PARM, &parm) == 0)
+                    {
+                        const auto &tpf = parm.parm.capture.timeperframe;
+                        snprintf(line, sizeof(line),
+                                 "    G_PARM: %u/%u s per frame (%.1f fps), capability=0x%x,"
+                                 " settable=%s, driver buffers=%u",
+                                 tpf.numerator, tpf.denominator,
+                                 tpf.numerator > 0
+                                     ? static_cast<double>(tpf.denominator) / tpf.numerator
+                                     : 0.0,
+                                 parm.parm.capture.capability,
+                                 (parm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) ? "yes" : "no",
+                                 parm.parm.capture.readbuffers);
+                    }
+                    else
+                    {
+                        snprintf(line, sizeof(line), "    G_PARM: not supported (errno %d)", errno);
+                    }
+                    logi("%s", line);
+                    appendFormatDetail(videoIndex_, line);
+                }
+
                 v4l2_requestbuffers request{};
                 request.count = 4;
                 request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -1928,6 +2424,8 @@ namespace camera_stream_manager
                 interpolated_.copyTo(oddLines, combMask_);
             }
 
+            bool hasPreviewLocked() const { return previewWindow_ != nullptr; }
+
             void renderPreviewLocked(const cv::Mat &rgbaFrame)
             {
                 if (previewWindow_ == nullptr)
@@ -1975,28 +2473,51 @@ namespace camera_stream_manager
                 // below still runs, and ensureStartedLocked() can start it again afterwards.
                 try
                 {
+                    // Housekeeping that used to run on every frame: two turns of the session
+                    // mutex, with four capture threads contending for it. Measured, the loop
+                    // spent 18 ms a frame outside the select and outside the work - more than
+                    // the work itself. None of it is urgent: a consumer that stopped can be
+                    // reaped a fifth of a second later without consequence.
+                    static constexpr int HOUSEKEEPING_EVERY = 8;
+                    int sinceHousekeeping = HOUSEKEEPING_EVERY;
+
                     while (running_.load())
                     {
-                        bool shouldExit = false;
+                        const int64_t iterationStartUs = nowUs();
+                        if (++sinceHousekeeping >= HOUSEKEEPING_EVERY)
                         {
-                            std::lock_guard<std::mutex> lock(mutex_);
-                            shouldExit = stopRequested_.load() && !hasConsumersLocked();
+                            sinceHousekeeping = 0;
+                            bool shouldExit = false;
+                            {
+                                std::lock_guard<std::mutex> lock(mutex_);
+                                shouldExit = stopRequested_.load() && !hasConsumersLocked();
+                            }
+                            if (shouldExit)
+                            {
+                                break;
+                            }
+                            cleanupStoppedConsumers();
                         }
-                        if (shouldExit)
+                        else if (stopRequested_.load())
                         {
-                            break;
+                            // Stopping is the one thing worth checking every time round, and
+                            // the flag is atomic: no lock needed to notice it.
+                            sinceHousekeeping = HOUSEKEEPING_EVERY;
                         }
 
                         fd_set readSet;
                         FD_ZERO(&readSet);
                         FD_SET(fd_, &readSet);
                         timeval timeout{0, PREVIEW_SELECT_TIMEOUT_US};
+                        const int64_t waitStartUs = nowUs();
                         const int ready = select(fd_ + 1, &readSet, nullptr, nullptr, &timeout);
                         if (ready <= 0)
                         {
-                            cleanupStoppedConsumers();
+                            countEmptySelect(videoIndex_, nowUs() - iterationStartUs);
+                            sinceHousekeeping = HOUSEKEEPING_EVERY;
                             continue;
                         }
+                        const int64_t waitedUs = nowUs() - waitStartUs;
 
                         v4l2_buffer buffer{};
                         buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -2005,34 +2526,58 @@ namespace camera_stream_manager
                         {
                             continue;
                         }
+                        const int64_t workStartUs = nowUs();
 
                         cv::Mat packedFrame(srcHeight_, srcWidth_, CV_8UC2, buffers_[buffer.index].start, srcStrideBytes_);
                         cv::Mat packedCrop = packedFrame(cv::Rect(0, 0, cropWidth_, cropHeight_));
-                        rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
-                        cv::cvtColor(packedCrop, rgbaScratch_, rgbaConversionCode(packedFormat_));
-                        countFrame(videoIndex_, nowUs());
+                        countFrame(videoIndex_, nowUs(), buffer.sequence);
 
                         std::vector<std::shared_ptr<FrameConsumer>> consumers;
+                        bool needRgba;
                         {
                             std::lock_guard<std::mutex> lock(mutex_);
-                            renderPreviewLocked(rgbaScratch_);
+                            // The per-camera preview is RGBA and so is any consumer that has not
+                            // asked for the packed buffer. If neither is here, the conversion
+                            // below is work nobody would look at.
+                            needRgba = hasPreviewLocked();
                             consumers.reserve(consumers_.size());
                             for (const auto &entry : consumers_)
                             {
                                 consumers.push_back(entry.second);
+                                if (entry.second != nullptr && !entry.second->wantsPackedFrame())
+                                {
+                                    needRgba = true;
+                                }
                             }
+                        }
+
+                        if (needRgba)
+                        {
+                            rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
+                            cv::cvtColor(packedCrop, rgbaScratch_, rgbaConversionCode(packedFormat_));
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            renderPreviewLocked(rgbaScratch_);
                         }
 
                         for (const auto &consumer : consumers)
                         {
-                            if (consumer != nullptr)
+                            if (consumer == nullptr)
+                            {
+                                continue;
+                            }
+                            if (consumer->wantsPackedFrame())
+                            {
+                                consumer->processPackedFrame(packedCrop);
+                            }
+                            else
                             {
                                 consumer->processFrame(rgbaScratch_);
                             }
                         }
 
                         ioctl(fd_, VIDIOC_QBUF, &buffer);
-                        cleanupStoppedConsumers();
+                        countTimings(videoIndex_, nowUs() - workStartUs, waitedUs,
+                                     nowUs() - iterationStartUs);
                     }
 
                 }
@@ -2579,19 +3124,92 @@ namespace camera_stream_manager
             char line[160];
             for (const auto &entry : gFrameCounts)
             {
-                const double seconds = (now - gFrameFirstUs[entry.first]) / 1000000.0;
-                snprintf(line, sizeof(line), "/dev/video%d: %lld frames in %.1fs = %.1f fps",
-                         entry.first, entry.second, seconds,
-                         seconds > 0.5 ? entry.second / seconds : 0.0);
+                const double seconds =
+                    (gFrameLastUs[entry.first] - gFrameFirstUs[entry.first]) / 1000000.0;
+                const long long missed = gMissedFrames[entry.first];
+                // Two rates, because they answer different questions. The first covers the
+                // whole span and so includes every pause - handing the cameras to the factory
+                // 360 view, or simply nobody asking for a frame between a preview and a
+                // recording. The second is the cadence while capture is actually running,
+                // which is the one that says whether the pipeline keeps up.
+                const double activeSeconds = gLoopUs[entry.first] / 1000000.0;
+                snprintf(line, sizeof(line),
+                         "/dev/video%d: %lld frames, %.1f fps while capturing"
+                         " (%.1f fps over %.1fs including pauses)",
+                         entry.first, entry.second,
+                         activeSeconds > 0.1 ? entry.second / activeSeconds : 0.0,
+                         seconds > 0.5 ? entry.second / seconds : 0.0, seconds);
                 out += line;
                 out += "\n";
+                // What the driver captured in the same window: ours plus the ones whose
+                // sequence numbers went by without us. If these two agree, the device is slow;
+                // if the second is far larger, we are.
+                snprintf(line, sizeof(line),
+                         "    driver captured %lld (%.1f fps), we missed %lld"
+                         " | busy %.1fms, waiting %.1fms, whole loop %.1fms per frame\n",
+                         entry.second + missed,
+                         seconds > 0.5 ? (entry.second + missed) / seconds : 0.0,
+                         missed,
+                         entry.second > 0 ? gWorkUs[entry.first] / 1000.0 / entry.second : 0.0,
+                         entry.second > 0 ? gWaitUs[entry.first] / 1000.0 / entry.second : 0.0,
+                         entry.second > 0 ? gLoopUs[entry.first] / 1000.0 / entry.second : 0.0);
+                out += line;
+            }
+            for (const auto &entry : gEmptyCount)
+            {
+                snprintf(line, sizeof(line),
+                         "/dev/video%d: %lld empty waits costing %.1fs in total"
+                         " (%.1f ms each)\n",
+                         entry.first, entry.second, gEmptyUs[entry.first] / 1000000.0,
+                         entry.second > 0 ? gEmptyUs[entry.first] / 1000.0 / entry.second : 0.0);
+                out += line;
+            }
+            if (gEncodeCount > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "encoder thread per frame: snapshot %.1fms, footer %.1fms,"
+                         " feeding the codec %.1fms, draining it %.1fms\n",
+                         gSnapUs / 1000.0 / gEncodeCount, gFooterUs / 1000.0 / gEncodeCount,
+                         gFeedUs / 1000.0 / gEncodeCount, gDrainUs / 1000.0 / gEncodeCount);
+                out += line;
+            }
+            if (gSleepCount > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "encoder thread slept %lld times: asked %.1fms, got %.1fms"
+                         " (overshoot %.1fms each)\n",
+                         gSleepCount, gSleepAskedUs / 1000.0 / gSleepCount,
+                         gSleepGotUs / 1000.0 / gSleepCount,
+                         (gSleepGotUs - gSleepAskedUs) / 1000.0 / gSleepCount);
+                out += line;
+            }
+            if (gPreviewCount > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "preview thread: %.1fms per post, %lld posts\n",
+                         gPreviewUs / 1000.0 / gPreviewCount, gPreviewCount);
+                out += line;
+            }
+            if (gCopyCount > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "copying one camera buffer out of mapped memory: %.1f ms average"
+                         " (%lld reads)\n",
+                         gCopyUs / 1000.0 / gCopyCount, gCopyCount);
+                out += line;
             }
             if (gComposedFrames > 0)
             {
-                const double seconds = (now - gComposedFirstUs) / 1000000.0;
-                snprintf(line, sizeof(line), "grid: %lld composed in %.1fs = %.1f fps",
-                         gComposedFrames, seconds,
-                         seconds > 0.5 ? gComposedFrames / seconds : 0.0);
+                const double seconds = (gComposedLastUs - gComposedFirstUs) / 1000000.0;
+                const double gridActive = (gSleepGotUs + gSnapUs + gFooterUs + gFeedUs
+                                           + gDrainUs) / 1000000.0;
+                snprintf(line, sizeof(line),
+                         "grid: %lld composed, %.1f fps while running"
+                         " (%.1f fps over %.1fs including pauses)",
+                         gComposedFrames,
+                         gridActive > 0.1 ? gComposedFrames / gridActive : 0.0,
+                         seconds > 0.5 ? gComposedFrames / seconds : 0.0,
+                         seconds);
                 out += line;
                 out += "\n";
             }
