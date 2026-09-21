@@ -377,7 +377,13 @@
             <Button
                 android:id="@+id/btnTestClip"
                 style="@style/TonalButtonCell"
+                android:layout_marginEnd="@dimen/button_gap"
                 android:text="@string/btn_test_clip" />
+
+            <Button
+                android:id="@+id/btnPreviewGrid"
+                style="@style/TonalButtonCell"
+                android:text="@string/btn_preview_grid" />
         </LinearLayout>
 
         <Button

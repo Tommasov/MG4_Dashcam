@@ -94,6 +94,12 @@
                 <action android:name="com.drivehub.kamera.action.TRIGGER_DASHCAM_EVENT" />
             </intent-filter>
         </receiver>
+        <!-- Opened from the main screen; not a launcher entry of its own. -->
+        <activity
+            android:name=".PreviewActivity"
+            android:exported="false"
+            android:label="@string/btn_preview_grid" />
+
 
         <!-- Serves a downloaded APK to the system installer via a content:// URI, for when the
              silent path is not available. -->

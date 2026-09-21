@@ -7,15 +7,15 @@ This is a stripped fork of [jamakr4/MG4-360-Camera-App](https://github.com/jamak
 whose author did the hard part: finding out how to get frames out of this vehicle's cameras at
 all. See [Relationship to upstream](#relationship-to-upstream).
 
-> **Status: it works, on one car.** A full commute on 18 September 2026 produced 27 minutes of
-> continuous recording: 51 consecutive clips, no crash, no dropped service, and every file
-> closed properly by the muxer. Two hand-offs to the factory 360 view happened during that run
-> — one on the move, one while parking — and recording picked itself back up both times.
+> **Status: it works, on one car.** An hour of continuous recording on 21 September 2026, and
+> a 33-minute stretch measured frame by frame: **54,706 frames per camera, 29.9 fps sustained,
+> not one dropped by the driver**. Six hand-offs to the factory 360 view in that session, all
+> of them resumed on their own, including one that held the screen for ninety-four seconds.
 >
 > That car is the author's. Nobody else's MG4 has run this, and the internal-storage target and
-> the event save still have little real mileage. One known limit: sharing a stick with music
-> playback can make the music stutter. Two USB volumes used to stop it recording altogether;
-> since 1.0.2 it asks which one to use.
+> the event save still have little real mileage. Two known limits: the changeover between
+> clips costs about a second of road every thirty, and sharing a stick with music playback can
+> make the music stutter.
 
 <p align="center">
   <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/screenshot-day.png" alt="The dashcam screen on the head unit, light theme" width="90%">
@@ -31,7 +31,7 @@ all. See [Relationship to upstream](#relationship-to-upstream).
 
 ## What it does
 
-- Records front, rear, left and right into a single 1200x800 clip at 25 fps, in 30-second
+- Records front, rear, left and right into a single 1440x1040 clip at 25 fps, in 30-second
   segments, with a footer showing the time, the speed and a signature of your choice.
 - Keeps the most recent N segments and deletes the rest. Default: 10 segments, about
   5 minutes and 340 MB.
@@ -44,11 +44,7 @@ all. See [Relationship to upstream](#relationship-to-upstream).
 
   If the loop is not running, the event captures the next three segments instead of the
   previous ones.
-- Records to internal storage, to a USB stick, or to USB with a fall back to internal. With
-  more than one stick connected it asks which, remembers the answer by the volume's UUID, and
-  says so plainly when the chosen one is not plugged in rather than quietly writing elsewhere.
-- Shows what the recordings occupy, and clears them on request.
-- Lets the bitrate be set, from the same screen.
+- Records to internal storage, to a USB stick, or to USB with a fall back to internal.
 - Yields the cameras while the factory 360/reverse view is on screen, so the stock reversing
   camera keeps working. Turning this off means the OEM app gets "Device or resource busy" for
   as long as the dashcam is recording.
@@ -71,69 +67,57 @@ floating banners. Those are upstream's, and upstream is where they belong.
 ## What a recording looks like
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame.png" alt="One recorded frame: front and rear stacked in the middle, the side cameras rotated down each edge, a footer with the date, time and speed" width="90%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="One recorded frame: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions, and a footer with the date, time and speed" width="90%">
 </p>
 
 <p align="center">
-  <em>One frame as 1.0.0 records it.</em>
-</p>
-
-Two things about that frame are wrong, and both come from a layout that was inherited rather
-than designed. Upstream's app shows one camera at a time, full screen on a 1920x720 head unit,
-so its cell is 720x240 - near enough the shape of the screen. The grid was assembled out of
-those cells afterwards.
-
-The canvas height is decided by the **side** cameras: they are 720 wide at the source, so they
-are 720 tall once rotated. The centre column stacks two 240-row cells and reaches 480, leaving
-120 rows of black above and below. **Eighteen per cent of every frame is black**, and it costs
-the same bitrate as picture does.
-
-The cells are also the wrong shape. The camera buffer holds two stacked 240-row fields rather
-than one 480-row image; the app keeps a single field, which is the whole field of view at half
-the vertical resolution. A 720x240 cell should therefore be shown as 720x480 - and it is not, so
-the fisheye circles come out as ellipses: **front and rear squashed vertically by 2x, and the
-sides squashed horizontally by the same amount** once they have been rotated. Look at the left
-and right strips above and you are looking at exactly that: a usable view, compressed into
-something you cannot read.
-
-It matters more here than it would elsewhere. Wrong proportions make distance and speed hard to
-judge, in footage somebody may one day have to read carefully.
-
-### What the next major version will look like
-
-<p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A recorded frame from the new layout: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions" width="90%">
-</p>
-
-<p align="center">
-  <em>Not a mock-up any more: a frame recorded by 1.1.0-beta.8.</em>
+  <em>One frame as 1.1.0 records it.</em>
 </p>
 
 A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no black. Front and
 rear sit side by side on top, which is the pair you want together when you are working out who
-came from where; left and right go below, each on the side it belongs to.
+came from where; left and right go below, each on the side it belongs to. The rear view is
+**not** mirrored: flipping it matches what a driver expects from a mirror, which is right when
+reversing and wrong in an archive, because it reverses every number plate behind you.
 
-It is being built on the [`grid-2x2`](../../tree/grid-2x2) branch and it records, at **25 fps**
-— the same as the factory 360 app. Getting there was not a matter of the layout: four cameras
-open together delivered six frames a second each until it turned out that the buffers
-`VIDIOC_REQBUFS` returns are not cached, and that reading one costs four milliseconds however
-few bytes you take from it.
+It records at **25 fps**, the same as the factory 360 app, with the cameras delivering 29.9
+each.
 
-Three smaller decisions came with it:
+### What it took to get there
 
-- **The rear view stops being mirrored.** Upstream flips it horizontally to match what a driver
-  expects from a mirror, which is right when you are reversing and wrong in an archive: it
-  reverses every number plate behind you.
-- **The upscale is bilinear**, not lanczos. A sharper filter only invents edges the encoder
-  then pays for. Measured on real footage at equal quality: lanczos costs 61 per cent more
-  bitrate than the current frame, bicubic 57, bilinear 41. It is an upscale only because the
-  second field is still being discarded; see
-  [the factory app's hidden recorder](#why-it-is-worth-knowing-about) for why that is a choice
-  and not a limit.
-- **The bitrate stays at 9 Mbit/s.** Quality per pixel drops, but today almost a fifth of those
-  bits go on black and the side views are unreadable anyway. Spending the same budget on picture
-  is the better trade, and it keeps the write rate - and the USB stick - where it is.
+The layout was the easy half. Four cameras open together delivered **six frames a second each**,
+and no amount of making the compositor cheaper moved it, because the cost was not where it
+looked. The buffers `VIDIOC_REQBUFS` hands back are **not cached**: the CPU reads them at about
+85 MB/s, so every extra pass over one costs four milliseconds however few bytes it takes. A
+conversion that touches the mapped buffer three times is slower than one that touches it once,
+however much less memory it moves overall.
 
+Reading it once, and keeping per-frame housekeeping off the capture loop, took capture to 29.9
+fps per camera. How to tell a slow device from a slow reader, what else looked guilty and was
+not, and two ways of measuring a frame rate that give confidently wrong answers are in
+[docs/capture-performance.md](docs/capture-performance.md).
+
+### What it still owes
+
+**Vertical resolution.** Each cell is the top field of the interlaced buffer, 720x240, stretched
+to 720x480; the other field's lines are in the buffer and are being thrown away. Weaving them
+back was written and measured - **127% more vertical detail**, see
+[docs/camera-format.md](docs/camera-format.md) - and then parked, because doing it in software
+cost half the frame rate. The way back is the MediaTek hardware de-interlacer the factory app
+uses, which gives full-height cells and still holds 25 fps.
+
+The stretch is bilinear rather than something sharper: a sharper filter only invents edges the
+encoder then pays for. Measured on real footage at equal quality, lanczos costs 61 per cent more
+bitrate, bicubic 57, bilinear 41.
+
+**A second a rotation.** Clips are cut every 30 seconds and the changeover is not free, so a
+little road goes unfilmed each time. The clip names and the chapter titles
+[join-clips.py](tools/join-clips.py) writes carry the real wall-clock time, so a gap is always
+visible and dated rather than silently closed up.
+
+**The bitrate stays at 9 Mbit/s**, about 58 MB a minute. It used to spend almost a fifth of
+itself on black bars; now every bit goes on picture, at the same write rate and the same load on
+the USB stick.
 
 ## Installing
 
@@ -211,9 +195,11 @@ rewriting is. An hour of driving a day writes roughly 1.5 TB a year onto the hea
 
 Two things worth knowing before turning the retention up:
 
-- The canvas and the bitrate do not depend on how many cameras you select. Recording only the
-  front camera still produces a full 1200x800 frame at 9 Mbit/s, with the other three
-  quadrants black. Deselecting cameras saves camera bandwidth, not storage.
+- The canvas does not depend on how many cameras you select. Recording only the front camera
+  still produces a full 1440x1040 frame, with the other three quadrants black for the whole
+  clip. Deselecting cameras saves camera bandwidth, not much storage: a still black quadrant
+  is nearly free in the frames between keyframes, but it is re-encoded in each keyframe, so it
+  is cheap rather than free.
 - Both numbers are constants in the code (`RecordingService.recordClip` and the sink
   constructor in `camera_stream_manager.cpp`). Lowering them means editing and, for the
   canvas, rebuilding the native library.
@@ -304,27 +290,28 @@ to be given on the command line.
 
 ### Why it is worth knowing about
 
-Those stills are what sent us looking at the capture format, and they are **720x480 per
-camera**. This app records cells of 720x240, because the V4L2 buffer holds two 240-row halves
-stacked and the capture path keeps one of them.
+Those stills are 720x480 per camera, and they are what sent us looking at the capture format -
+which turned out to be the most useful thing in this repository.
 
-That costs vertical resolution, not field of view: a 720x240 cell stretched back to 720x480 is
-a complete, correctly proportioned fisheye. But the other half is not a duplicate, and it is
-not noise either. **The buffer is interlaced**, measured on a raw dump rather than guessed:
-the two halves differ in 73% of their bytes, the second half's lines sit *between* the first
-half's, and the gradient across the A→B and B→A joins is the same to within 0.4% — which is
-what interleaving two fields of one picture looks like and what a duplicate cannot produce.
-Woven, the vertical detail is **127% higher** than line-doubling gives.
+Each camera hands over a **720x480 interlaced** frame. This app records cells of 720x240, because
+the capture path keeps one field and discards the other. That costs vertical resolution, not
+field of view: a 720x240 cell stretched back to 720x480 is a complete, correctly proportioned
+fisheye. But the missing scan lines are not gone - they are in the same buffer, in rows 240-479,
+and interleaving the two halves recovers **127% more vertical detail**, measured.
 
-The factory stills are not evidence against this. They are progressive because the factory app
-runs the frames through the MediaTek hardware de-interlacer before saving them:
-`libv4l2utils.so` exports `v4l2_OpenMtkDI`. The driver's own `field=V4L2_FIELD_NONE` is simply
-wrong.
+The driver reports `field=V4L2_FIELD_NONE`, a progressive frame. It is wrong. And the factory
+stills are not evidence to the contrary: the factory app runs the frames through the MediaTek
+hardware de-interlacer first - `libv4l2utils.so` exports `v4l2_OpenMtkDI`.
 
-So the missing lines are recoverable, and the way to do it is the hardware path the factory app
-already uses — it holds 25 fps while doing so. The full evidence, the method for reproducing it
-and a software attempt that was measured and then parked are on the
-[`grid-2x2`](../../tree/grid-2x2/docs) branch, where the next major version is being built.
+The evidence, the method for reproducing it, and what to do about it are in
+[docs/camera-format.md](docs/camera-format.md).
+
+### Reading all four at once
+
+The same stills are why the capture rate is what it is. Four cameras open together delivered six
+frames a second each until it turned out the mapped buffers are not cached - see
+[what it took to get there](#what-it-took-to-get-there) and
+[docs/capture-performance.md](docs/capture-performance.md).
 
 ## Updating
 

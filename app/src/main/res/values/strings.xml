@@ -32,7 +32,10 @@
     <string name="camera_right">Right</string>
     <string name="btn_test_clip">Record a test clip</string>
     <string name="btn_eject_usb">Stop and eject USB</string>
+    <string name="btn_preview_close">Close</string>
     <string name="section_tools">Tools</string>
+    <string name="btn_preview_grid">Preview the recorded frame</string>
+    <string name="preview_unavailable">Cannot show it: the cameras are not available. Usually that means the factory 360 view has them, for as long as it is on screen.</string>
     <string name="btn_storage_details">Show storage details</string>
     <string name="btn_send_probe">Send a diagnostics report</string>
     <string name="probe_dialog_title">Send this report to the author?</string>

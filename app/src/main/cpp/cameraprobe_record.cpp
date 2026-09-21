@@ -144,3 +144,66 @@ Java_com_drivehub_kamera_CameraProbe_updateCombinedRecordingSpeed(JNIEnv* /*env*
         return true;
     });
 }
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_drivehub_kamera_CameraProbe_describeCameraFormats(JNIEnv* env, jclass /*clazz*/) {
+    std::string text;
+    try {
+        text = camera_stream_manager::describeFormats();
+    } catch (...) {
+        text = "unavailable";
+    }
+    return env->NewStringUTF(text.c_str());
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_drivehub_kamera_CameraProbe_attachCombinedPreview(JNIEnv* env, jclass /*clazz*/,
+                                                           jobject surface,
+                                                           jint cellWidth,
+                                                           jint cellHeight,
+                                                           jint fps,
+                                                           jstring signature,
+                                                           jboolean showSpeed,
+                                                           jint cameraMask) {
+    return guarded("attachCombinedPreview", [&]() -> bool {
+        std::string signatureText;
+        if (signature != nullptr) {
+            const char* chars = env->GetStringUTFChars(signature, nullptr);
+            if (chars != nullptr) {
+                signatureText.assign(chars);
+                env->ReleaseStringUTFChars(signature, chars);
+            }
+        }
+        return camera_stream_manager::attachCombinedPreview(
+                env, surface,
+                static_cast<int>(cellWidth), static_cast<int>(cellHeight),
+                static_cast<int>(fps), signatureText,
+                showSpeed == JNI_TRUE, static_cast<int>(cameraMask));
+    }) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_drivehub_kamera_CameraProbe_detachCombinedPreview(JNIEnv* /*env*/, jclass /*clazz*/) {
+    return guarded("detachCombinedPreview", [&]() -> bool {
+        return camera_stream_manager::detachCombinedPreview();
+    }) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_drivehub_kamera_CameraProbe_previewCanvasWidth(JNIEnv* /*env*/, jclass /*clazz*/,
+                                                        jint cellWidth, jint cellHeight) {
+    return camera_stream_manager::previewCanvasWidth(
+            static_cast<int>(cellWidth), static_cast<int>(cellHeight));
+}
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_drivehub_kamera_CameraProbe_previewCanvasHeight(JNIEnv* /*env*/, jclass /*clazz*/,
+                                                         jint cellWidth, jint cellHeight) {
+    return camera_stream_manager::previewCanvasHeight(
+            static_cast<int>(cellWidth), static_cast<int>(cellHeight));
+}

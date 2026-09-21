@@ -17,6 +17,25 @@ bool startCombinedRecording(JNIEnv* env, const std::string& outputPath,
                             int cellWidth, int cellHeight, int fps, int bitrate,
                             const std::string& signature, bool showSpeed, int cameraMask);
 bool stopCombinedRecording();
+
+/** Shows the composed grid live on a Surface - the same canvas that recording writes. */
+bool attachCombinedPreview(JNIEnv* env, jobject surface, int cellWidth, int cellHeight,
+                           int fps, const std::string& signature, bool showSpeed,
+                           int cameraMask);
+bool detachCombinedPreview();
+
+/** The composed canvas size, so a preview can be given the right shape rather than a stretch. */
+int previewCanvasWidth(int cellWidth, int cellHeight);
+int previewCanvasHeight(int cellWidth, int cellHeight);
 void updateCombinedRecordingSpeed(int speedKmh);
+
+/**
+ * What each camera device reported the last time it was opened: pixel format, size, stride and
+ * field order.
+ *
+ * <p>There is no adb on this head unit, so anything the native side learns and only writes to
+ * logcat is learned in private. This hands it back for the diagnostics report.
+ */
+std::string describeFormats();
 
 } // namespace camera_stream_manager

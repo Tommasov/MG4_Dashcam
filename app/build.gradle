@@ -44,13 +44,10 @@ android {
         applicationId "com.tommasov.mg4dashcam"
         minSdk 28
         targetSdk 36
-        versionCode 62
-        versionName "1.0.3"
-
+        versionCode 64
+        versionName "1.1.0"
         // Where the update manifests live, one per channel, as in the launcher.
-
         buildConfigField "String", "UPDATE_BASE_URL",
-
                 "\"https://ws2.tommasovietina.it/mg4/MG4_Dashcam/\""
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"

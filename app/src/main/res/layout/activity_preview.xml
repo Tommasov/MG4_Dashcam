@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The recorded frame, shown at its own shape on a black field: the canvas is 3:2 and the head
+     unit is 8:3, so the bars at the sides are the honest thing to show. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/previewFrame"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <SurfaceView
+        android:id="@+id/previewSurface"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center" />
+
+    <!-- The way out. The head unit has no back affordance this screen can count on, and a
+         full-screen black rectangle with no exit is a trap. Top right, out of the picture,
+         always there. -->
+    <Button
+        android:id="@+id/btnPreviewClose"
+        style="@style/TonalButtonOnDark"
+        android:layout_gravity="top|end"
+        android:layout_margin="@dimen/screen_padding"
+        android:text="@string/btn_preview_close" />
+
+    <TextView
+        android:id="@+id/tvPreviewHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:padding="@dimen/screen_padding"
+        android:textColor="#FFFFFF"
+        android:textSize="@dimen/row_label_size"
+        android:visibility="gone"
+        android:text="@string/preview_unavailable" />
+</FrameLayout>

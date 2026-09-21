@@ -88,6 +88,13 @@
         <item name="android:gravity">center</item>
     </style>
 
+    <!-- A tonal button over the preview, where the background is black whatever the head unit
+         theme says. -->
+    <style name="TonalButtonOnDark" parent="TonalButton">
+        <item name="android:background">@drawable/bg_tonal_button_on_dark</item>
+        <item name="android:textColor">#FFFFFF</item>
+    </style>
+
     <style name="Hairline" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">@dimen/hairline_height</item>
