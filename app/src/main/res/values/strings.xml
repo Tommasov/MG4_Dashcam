@@ -164,4 +164,7 @@
     <string name="update_permission_open_settings">Open the setting</string>
     <string name="channel_beta">beta</string>
     <string name="update_banner">Version %1$s is available — tap to install</string>
+    <string name="update_while_recording_title">Stop recording first</string>
+    <string name="update_while_recording_message">Installing an update restarts the app, which cuts the clip being written and throws it away. Stop the loop, install, then turn it back on.</string>
+    <string name="update_while_recording_stop">Stop and install</string>
 </resources>

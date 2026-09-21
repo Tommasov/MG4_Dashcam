@@ -163,4 +163,7 @@
     <string name="update_permission_open_settings">Apri l\'impostazione</string>
     <string name="channel_beta">beta</string>
     <string name="update_banner">È disponibile la versione %1$s — tocca per installare</string>
+    <string name="update_while_recording_title">Prima ferma la registrazione</string>
+    <string name="update_while_recording_message">Installare un aggiornamento riavvia l\'app, e lo spezzone in scrittura viene troncato e buttato. Ferma il loop, installa, poi riaccendilo.</string>
+    <string name="update_while_recording_stop">Ferma e installa</string>
 </resources>

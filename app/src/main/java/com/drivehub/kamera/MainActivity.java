@@ -274,6 +274,27 @@ public class MainActivity extends AppCompatActivity {
      * Checking afterwards meant waiting for five megabytes to arrive and then being told no.
      */
     private void onInstallChosen(UpdateInfo info) {
+        // Replacing the package kills this process, and with it the recording service: the
+        // clip being written is left without its index and thrown away. Nothing warned about
+        // that until updates started installing on their own, at which point the cost stopped
+        // being theoretical. The loop switch, not the momentary status: a recording paused for
+        // the factory 360 view is still a recording about to continue.
+        if (DashcamSettings.isEnabled(prefs())) {
+            Dialogs.builder(this)
+                    .setTitle(R.string.update_while_recording_title)
+                    .setMessage(R.string.update_while_recording_message)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.update_while_recording_stop, (d, w) -> {
+                        // The same path the switch takes, so the service is stopped rather
+                        // than left running against a preference that says it should not be.
+                        DashcamSettings.setEnabled(prefs(), false);
+                        RecordingService.stopIfRunning(this);
+                        swEnabled.setChecked(false);
+                        onInstallChosen(info);
+                    })
+                    .show();
+            return;
+        }
         if (!DashcamUpdates.canInstall(this)) {
             Dialogs.builder(this)
                     .setTitle(R.string.update_permission_title)
