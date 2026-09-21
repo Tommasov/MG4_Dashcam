@@ -162,4 +162,6 @@
     <string name="update_permission_title">Allow installing first</string>
     <string name="update_permission_message">Android will not let this app install an update until you allow it under \"install unknown apps\". Open the setting, turn it on, then come back and press Install again.</string>
     <string name="update_permission_open_settings">Open the setting</string>
+    <string name="channel_beta">beta</string>
+    <string name="update_banner">Version %1$s is available — tap to install</string>
 </resources>

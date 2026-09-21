@@ -161,4 +161,6 @@
     <string name="update_permission_title">Prima serve un permesso</string>
     <string name="update_permission_message">Android non lascia installare un aggiornamento a questa app finché non glielo consenti fra le \"app da fonti sconosciute\". Apri l\'impostazione, attivala, poi torna qui e premi di nuovo Installa.</string>
     <string name="update_permission_open_settings">Apri l\'impostazione</string>
+    <string name="channel_beta">beta</string>
+    <string name="update_banner">È disponibile la versione %1$s — tocca per installare</string>
 </resources>

@@ -200,7 +200,7 @@ public class MainActivity extends AppCompatActivity {
         refreshUpdateBadge();
         // Rate-limited to once a day inside, and silent whatever it finds: the only thing it
         // can do to the screen is light the mark beside the version.
-        DashcamUpdates.checkQuietly(this);
+        DashcamUpdates.checkQuietly(this, this::refreshUpdateBadge);
     }
 
     /**
@@ -208,14 +208,27 @@ public class MainActivity extends AppCompatActivity {
      * the screen costs nothing.
      */
     private void refreshUpdateBadge() {
-        TextView badge = findViewById(R.id.tvUpdateBadge);
         String pending = DashcamUpdates.pendingVersionName(this, prefs());
-        if (pending == null) {
-            badge.setVisibility(View.GONE);
-            return;
+
+        TextView badge = findViewById(R.id.tvUpdateBadge);
+        badge.setVisibility(pending == null ? View.GONE : View.VISIBLE);
+        if (pending != null) {
+            badge.setText(getString(R.string.update_badge, pending));
         }
-        badge.setText(getString(R.string.update_badge, pending));
-        badge.setVisibility(View.VISIBLE);
+
+        // The same news at the top, where the eye lands on opening. The mark by the version
+        // number stays: it is the one that answers "which build is this and is it current",
+        // which is a different question from "there is something new".
+        TextView banner = findViewById(R.id.tvUpdateBanner);
+        banner.setVisibility(pending == null ? View.GONE : View.VISIBLE);
+        if (pending != null) {
+            banner.setText(getString(R.string.update_banner, pending));
+            banner.setOnClickListener(v -> checkForUpdates());
+        }
+
+        // Which channel this build came from, beside the name. Nothing on stable.
+        findViewById(R.id.tvChannel).setVisibility(
+                UiPrefs.isUpdateBetaChannel(prefs()) ? View.VISIBLE : View.GONE);
     }
 
     /** The button: says what it found either way, and offers to install when there is one. */

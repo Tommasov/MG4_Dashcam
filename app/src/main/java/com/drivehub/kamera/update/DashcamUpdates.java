@@ -96,22 +96,37 @@ public final class DashcamUpdates {
      * car park is the normal case, not something to report.
      */
     public static void checkQuietly(@NonNull Context context) {
+        checkQuietly(context, null);
+    }
+
+    /**
+     * The same check, with something to run once it has written its answer down.
+     *
+     * <p>The screen draws before the network answers, so a mark read from stored state would
+     * only appear the next time the app was opened - which for a notice meant to be seen on
+     * opening is a launch too late. The callback runs on the main thread, and only when the
+     * check actually ran.
+     */
+    public static void checkQuietly(@NonNull Context context, @Nullable Runnable onFinished) {
         SharedPreferences prefs = UiPrefs.getPrefs(context);
         long since = System.currentTimeMillis() - UiPrefs.getUpdateLastCheckMs(prefs);
         if (since >= 0 && since < QUIET_CHECK_INTERVAL_MS) {
             return;
         }
+        final Runnable done = onFinished == null ? () -> { } : onFinished;
         new UpdateChecker(context, BASE_URL).check(manifestFor(prefs), new UpdateChecker.Callback() {
             @Override
             public void onUpdateAvailable(@NonNull UpdateInfo info) {
                 UiPrefs.rememberUpdateSeen(prefs, info.versionCode, info.versionName);
                 DevRuntimeLog.add(TAG, "quiet check: " + info.versionName + " available");
+                done.run();
             }
 
             @Override
             public void onUpToDate() {
                 UiPrefs.rememberUpdateSeen(prefs, currentVersionCode(context), "");
                 DevRuntimeLog.add(TAG, "quiet check: up to date");
+                done.run();
             }
 
             @Override

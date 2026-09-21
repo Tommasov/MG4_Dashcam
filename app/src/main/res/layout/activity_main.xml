@@ -19,6 +19,29 @@
         android:orientation="vertical"
         android:padding="@dimen/screen_padding">
 
+        <!-- An update waiting, said once and at the top.
+             It used to be a word beside the version number in the bottom corner, which is
+             where somebody looks when they already suspect there is a new version - not where
+             they look on opening the screen. Tapping it goes straight to the check. -->
+        <TextView
+            android:id="@+id/tvUpdateBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="@dimen/row_gap"
+            android:background="@drawable/bg_status_pill"
+            android:backgroundTint="@color/status_paused"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:paddingStart="@dimen/status_pill_padding_h"
+            android:paddingEnd="@dimen/status_pill_padding_h"
+            android:paddingTop="@dimen/status_pill_padding_v"
+            android:paddingBottom="@dimen/status_pill_padding_v"
+            android:textColor="@color/status_text"
+            android:textSize="@dimen/secondary_text_size"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
         <!-- Header: what this is, and what it is doing right now. -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -26,14 +49,47 @@
             android:baselineAligned="true"
             android:orientation="horizontal">
 
-            <TextView
-                android:layout_width="0dp"
+            <!-- The name and the channel mark travel together, in a box of their own.
+                 Sharing the header row put the mark on the row's baseline, which is set by a
+                 status pill twice the height of the text, so it hung below the name instead of
+                 sitting beside it. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/app_name"
-                android:textColor="@color/text_primary"
-                android:textSize="@dimen/title_size"
-                android:textStyle="bold" />
+                android:layout_gravity="center_vertical"
+                android:baselineAligned="false"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/title_size"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvChannel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/button_gap"
+                    android:text="@string/channel_beta"
+                    android:textAllCaps="true"
+                    android:textColor="@color/status_paused"
+                    android:textSize="@dimen/secondary_text_size"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- The gap that keeps the status pill against the right edge. It has to be a view
+                 of its own: hanging the weight on the title would stretch the title, and
+                 hanging it on the channel mark would collapse when that mark is hidden, which
+                 is exactly what pulled the pill in beside the name. -->
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:id="@+id/tvStatusDetail"
