@@ -5,6 +5,10 @@ import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
 import com.drivehub.kamera.dev.CrashTrail;
 import com.drivehub.kamera.dev.DevRuntimeLog;
+import com.drivehub.kamera.update.ApkDownloader;
+import com.drivehub.kamera.update.ApkInstaller;
+import com.drivehub.kamera.update.DashcamUpdates;
+import com.drivehub.kamera.update.UpdateInfo;
 import com.drivehub.kamera.dev.ProbeReport;
 import com.drivehub.kamera.dev.OemCaptures;
 import com.drivehub.kamera.settings.Dialogs;
@@ -157,6 +161,13 @@ public class MainActivity extends AppCompatActivity {
         View sendProbe = findViewById(R.id.btnSendProbe);
         sendProbe.setVisibility(ProbeReport.isConfigured() ? View.VISIBLE : View.GONE);
         sendProbe.setOnClickListener(v -> confirmSendProbe());
+        findViewById(R.id.btnCheckUpdates).setOnClickListener(v -> checkForUpdates());
+        SwitchCompat beta = findViewById(R.id.swBetaChannel);
+        beta.setChecked(UiPrefs.isUpdateBetaChannel(prefs()));
+        beta.setOnCheckedChangeListener((b, checked) -> {
+            UiPrefs.setUpdateBetaChannel(prefs(), checked);
+            refreshUpdateBadge();
+        });
         findViewById(R.id.btnCopyOemCaptures).setOnClickListener(v -> copyOemCaptures());
         findViewById(R.id.btnDeleteOemCaptures).setOnClickListener(v -> confirmDeleteOemCaptures());
 
@@ -184,6 +195,117 @@ public class MainActivity extends AppCompatActivity {
         refreshUsbVolumeButton();
         refreshStorageStatus();
         refreshStorageUsage();
+        refreshUpdateBadge();
+        // Rate-limited to once a day inside, and silent whatever it finds: the only thing it
+        // can do to the screen is light the mark beside the version.
+        DashcamUpdates.checkQuietly(this);
+    }
+
+    /**
+     * The mark beside the version line. Read from what the last check wrote down, so opening
+     * the screen costs nothing.
+     */
+    private void refreshUpdateBadge() {
+        TextView badge = findViewById(R.id.tvUpdateBadge);
+        String pending = DashcamUpdates.pendingVersionName(this, prefs());
+        if (pending == null) {
+            badge.setVisibility(View.GONE);
+            return;
+        }
+        badge.setText(getString(R.string.update_badge, pending));
+        badge.setVisibility(View.VISIBLE);
+    }
+
+    /** The button: says what it found either way, and offers to install when there is one. */
+    private void checkForUpdates() {
+        TextView details = findViewById(R.id.tvStorageDetails);
+        details.setText(R.string.update_checking);
+        DashcamUpdates.checkNow(this, new DashcamUpdates.Listener() {
+            @Override
+            public void onUpdateAvailable(UpdateInfo info) {
+                refreshUpdateBadge();
+                details.setText(getString(R.string.update_available_title, info.versionName));
+                offerUpdate(info);
+            }
+
+            @Override
+            public void onUpToDate() {
+                refreshUpdateBadge();
+                details.setText(R.string.update_up_to_date);
+            }
+
+            @Override
+            public void onError(Exception e) {
+                details.setText(getString(R.string.update_check_failed, String.valueOf(e)));
+            }
+        });
+    }
+
+    private void offerUpdate(UpdateInfo info) {
+        String changelog = info.changelog == null ? "" : info.changelog.trim();
+        Dialogs.builder(this)
+                .setTitle(getString(R.string.update_available_title, info.versionName))
+                .setMessage(changelog.isEmpty() ? null : changelog)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.btn_update_install, (d, w) -> onInstallChosen(info))
+                .show();
+    }
+
+    /**
+     * Asks for the permission first and downloads second.
+     *
+     * <p>Android refuses to install a package handed over by an app the user has not allowed
+     * under "install unknown apps", and it refuses with a message that says nothing useful.
+     * Checking afterwards meant waiting for five megabytes to arrive and then being told no.
+     */
+    private void onInstallChosen(UpdateInfo info) {
+        if (!DashcamUpdates.canInstall(this)) {
+            Dialogs.builder(this)
+                    .setTitle(R.string.update_permission_title)
+                    .setMessage(R.string.update_permission_message)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.update_permission_open_settings,
+                            (d, w) -> DashcamUpdates.requestInstallPermission(this))
+                    .show();
+            return;
+        }
+        downloadUpdate(info);
+    }
+
+    private void downloadUpdate(UpdateInfo info) {
+        TextView details = findViewById(R.id.tvStorageDetails);
+        ApkDownloader downloader = new ApkDownloader(this);
+        downloader.start(info, new ApkDownloader.Callback() {
+            @Override
+            public void onProgress(int percent) {
+                details.setText(getString(R.string.update_downloading, percent));
+            }
+
+            @Override
+            public void onComplete(java.io.File apk) {
+                // Verified before anything is handed to an installer: a truncated download and
+                // a tampered one look the same from here, and neither should be installed.
+                // Hashing five megabytes is long enough to be felt on the main thread, so it
+                // happens on the io executor and only the verdict comes back.
+                ioExecutor.execute(() -> {
+                    boolean ok = ApkInstaller.verify(apk, info.sha256);
+                    mainHandler.post(() -> {
+                        if (!ok) {
+                            //noinspection ResultOfMethodCallIgnored
+                            apk.delete();
+                            details.setText(R.string.update_checksum_failed);
+                            return;
+                        }
+                        DashcamUpdates.installVerified(MainActivity.this, apk);
+                    });
+                });
+            }
+
+            @Override
+            public void onFailed(String reason) {
+                details.setText(getString(R.string.update_download_failed, reason));
+            }
+        });
     }
 
     /**

@@ -80,8 +80,14 @@ def probe(path):
     duration = float(info.get("format", {}).get("duration", 0.0))
     # Kept as a tuple so clips that cannot be copy-joined are caught before ffmpeg writes a file
     # that plays for ten seconds and then falls apart.
+    #
+    # The frame rate is deliberately not part of it. The app stamps each frame with the moment
+    # it was composed rather than with a slot on a fixed grid, so the spacing is not uniform and
+    # ffprobe guesses a different r_frame_rate for every clip - 25/1 for one, 151/6 for the
+    # next, 90000/1 for a third. None of that stops the packets being copied across: the codec,
+    # the picture size and the pixel format are what have to match.
     stream = (video.get("codec_name"), video.get("width"), video.get("height"),
-              video.get("pix_fmt"), video.get("r_frame_rate"))
+              video.get("pix_fmt"))
     return duration, stream
 
 

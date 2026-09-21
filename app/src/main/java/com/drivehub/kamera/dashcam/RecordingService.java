@@ -13,8 +13,10 @@ import android.app.Notification;
 import android.app.ActivityManager;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.IBinder;
@@ -78,6 +80,16 @@ public class RecordingService extends Service {
     private static final String ERROR_GRID_START_FAILED = "grid start failed";
     private static final String ERROR_GRID_STOP_TIMEOUT = "grid stop timeout";
     private static final String ERROR_USB_STORAGE = "usb storage unavailable";
+    /**
+     * The chosen volume is there and will not take a byte.
+     *
+     * <p>Worth its own state because the only thing that fixes it is physical, and nothing in
+     * the app can do it: the volume comes back read-only after the head unit is suspended
+     * mid-write, and stays that way until it is unplugged and reinserted, which is what gets
+     * the filesystem checked. Telling somebody "USB unavailable" while the stick sits there
+     * with its light on sends them looking in the wrong place.
+     */
+    private static final String ERROR_USB_READ_ONLY = "usb volume read only";
     private static final String ERROR_LOOP_DIED = "recording loop died";
     private static final String ERROR_STALLED = "recording stalled";
     private static final String ERROR_CRASH_LOOP = "crash loop";
@@ -319,7 +331,82 @@ public class RecordingService extends Service {
                 .apply();
         NotificationChannelHelper.ensureChannel(this, CHANNEL_ID, R.string.notification_channel_recording);
         restoreEventState();
+        registerScreenReceiver();
         mainHandler.postDelayed(supervisor, SUPERVISOR_PERIOD_MS);
+    }
+
+    /**
+     * Closes the clip before the head unit suspends, and picks up again when it wakes.
+     *
+     * <p>Locking the car puts the tablet into standby and, about a minute later, the SoC stops
+     * running us. Nothing in this app decided to stop: we were simply frozen, mid-clip, with a
+     * file open on the stick. On 19 September 2026 that left the volume mounted read-only on the
+     * next drive - present, listed, and refusing every one of the three paths the probe tries -
+     * until it was unplugged and put back, which is what makes a filesystem get checked.
+     *
+     * <p>It had survived dozens of ignition cycles before that and failed the first time one
+     * happened with the loop running, which is what points at the open file rather than at the
+     * mount. Closing the clip is a mitigation, not a proof: an interrupted write is far more
+     * likely to leave an inconsistency than a finished one, but only more mileage will say
+     * whether it is the whole story.
+     *
+     * <p>Screen off is not by itself a reason to stop. The display can be turned off on the
+     * move, and a dashcam that stops recording because somebody dimmed the screen at night
+     * would be worse than the bug it is fixing - so the car has to be stationary too.
+     */
+    private void registerScreenReceiver() {
+        if (screenReceiver != null) {
+            return;
+        }
+        screenReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent == null ? null : intent.getAction();
+                if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                    onScreenOff();
+                } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                    onScreenOn();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        // Screen state is not deliverable from the manifest: it has to be a live receiver.
+        registerReceiver(screenReceiver, filter);
+    }
+
+    private void onScreenOff() {
+        if (worker == null || stopRequested || usbEjectInProgress) {
+            return;
+        }
+        int speedKmh = VehicleSpeedReader.readSpeedKmh();
+        if (speedKmh > SCREEN_OFF_MAX_SPEED_KMH) {
+            DevRuntimeLog.add("RecordingService",
+                    "screen off at " + speedKmh + " km/h; still driving, keeping the loop");
+            return;
+        }
+        DevRuntimeLog.add("RecordingService",
+                "screen off at " + speedKmh + " km/h; closing the clip before standby");
+        pausedForScreenOff = true;
+        shutdownRecordingServiceWithoutStopSelf();
+        // Off the main thread: quiescence waits for the muxer, and this runs inside a broadcast.
+        new Thread(() -> {
+            boolean quiet = awaitShutdownQuiescence();
+            DevRuntimeLog.add("RecordingService",
+                    quiet ? "clip closed before standby" : "standby came before the clip closed");
+        }, "RecordingServiceStandby").start();
+    }
+
+    private void onScreenOn() {
+        if (!pausedForScreenOff) {
+            return;
+        }
+        pausedForScreenOff = false;
+        DevRuntimeLog.add("RecordingService", "screen on; the supervisor will restart the loop");
+        // No restart here. The supervisor already starts a loop whenever the switch is on and
+        // no worker is running, and it is the path that has been exercised; a second way in
+        // would be a second thing to keep correct.
     }
 
     @Override
@@ -419,6 +506,15 @@ public class RecordingService extends Service {
             boolean wasPaused = STATUS_PAUSED_OEM.equals(prefs().getString(KEY_STATUS, STATUS_OFF));
             oemPauseRequested = false;
             segmentStopRequested = false;
+            // The watchdog asks how long it has been since a segment was written. While the
+            // cameras are with the factory app the answer is "a while, on purpose", and the
+            // watchdog knows to stay quiet - but the time still accumulated, and the first
+            // check after the hand-off ended saw all of it at once. On 20 September 2026 a
+            // legitimate two-and-a-half minute 360 session ended with "no segment for 168s"
+            // and a recording error on screen, eleven seconds after recording had resumed
+            // perfectly well. The clock for "have we written anything lately" starts when we
+            // are able to write again.
+            lastSegmentCompletedMs = System.currentTimeMillis();
             pausedSinceMs = 0L;
             oemForegroundSinceMs = 0L;
             oemGoneSinceMs = 0L;
@@ -906,7 +1002,16 @@ public class RecordingService extends Service {
                 // that stays stale, a broadcast that never came - a dashcam that stays paused is
                 // a dashcam that is not recording. Contending briefly with the factory camera is
                 // the lesser failure.
-                if (oemPauseRequested && pausedSinceMs > 0
+                //
+                // But not while the factory app is demonstrably still on screen. A long 360
+                // session is indistinguishable from a stuck pause if the only thing consulted
+                // is how long the pause has lasted, and on 20 September 2026 a two-and-a-half
+                // minute session became a loop: every sixty seconds we took the cameras back,
+                // opened a segment the hand-off immediately killed, discarded it at 3223 bytes
+                // and paused again. The poll already knows the answer - `front` was read a few
+                // lines up - so the fallback now only covers the case it was written for, a
+                // pause with nothing on the other end of it.
+                if (oemPauseRequested && !front && pausedSinceMs > 0
                         && System.currentTimeMillis() - pausedSinceMs > MAX_OEM_PAUSE_MS) {
                     DevRuntimeLog.add("RecordingService",
                             "paused for over " + (MAX_OEM_PAUSE_MS / 1000) + "s; forcing resume");
@@ -954,11 +1059,22 @@ public class RecordingService extends Service {
      * loop-bound watchdog could not fire because the loop had never started. A supervisor that
      * outlives the loop is the only thing that catches the states nobody thought of.
      */
+    /** Standby closed the clip; the supervisor must not undo that until the screen is back. */
+    private volatile boolean pausedForScreenOff = false;
+    private BroadcastReceiver screenReceiver;
+
+    /**
+     * Below this the car counts as stopped for the purpose of a screen going dark. Not zero:
+     * the property can read a km/h or two at a standstill, and this decision only has to tell
+     * parked from driving.
+     */
+    private static final int SCREEN_OFF_MAX_SPEED_KMH = 3;
+
     private final Runnable supervisor = new Runnable() {
         @Override
         public void run() {
             try {
-                if (!stopRequested && !usbEjectInProgress && worker == null
+                if (!stopRequested && !usbEjectInProgress && !pausedForScreenOff && worker == null
                         && prefs().getBoolean(DashcamSettings.KEY_ENABLED, false)) {
                     DevRuntimeLog.add("RecordingService", "supervisor: enabled but no worker; restarting");
                     stopRequested = false;
@@ -1439,7 +1555,10 @@ public class RecordingService extends Service {
                 return null;
             }
             DevRuntimeLog.add("RecordingService", "Storage resolve failed: " + res.usbState);
-            publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_USB_STORAGE);
+            boolean readOnly = res.usbState == DashcamStorageManager.UsbState.NOT_WRITABLE
+                    || res.usbState == DashcamStorageManager.UsbState.WRITE_TEST_FAILED;
+            publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS,
+                    readOnly ? ERROR_USB_READ_ONLY : ERROR_USB_STORAGE);
             return null;
         }
         if (!ensureDirectoryExists(res.baseDir, "records base dir") || !res.baseDir.canWrite()) {
@@ -1772,6 +1891,11 @@ public class RecordingService extends Service {
                     R.string.dashcam_recording_error_overlay_subtitle_crash_loop,
                     R.string.notification_dashcam_recording_error_crash_loop_text);
         }
+        if (ERROR_USB_READ_ONLY.equals(lastError)) {
+            return new OverlayMessageSpec(
+                    R.string.dashcam_recording_error_overlay_subtitle_usb_read_only,
+                    R.string.notification_dashcam_recording_error_usb_read_only_text);
+        }
         if (ERROR_USB_STORAGE.equals(lastError)) {
             return new OverlayMessageSpec(
                     R.string.dashcam_recording_error_overlay_subtitle_usb_unavailable,
@@ -1933,6 +2057,14 @@ public class RecordingService extends Service {
         stopRequested = true;
         mainHandler.removeCallbacks(watchdog);
         mainHandler.removeCallbacks(supervisor);
+        if (screenReceiver != null) {
+            try {
+                unregisterReceiver(screenReceiver);
+            } catch (Throwable ignored) {
+                // Already gone: the service is being torn down either way.
+            }
+            screenReceiver = null;
+        }
         cancelPendingErrorOverlay();
         oemWatchGeneration++;
         oemPollExecutor.shutdownNow();

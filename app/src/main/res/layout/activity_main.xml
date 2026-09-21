@@ -334,6 +334,20 @@
                 <TextView
                     style="@style/Hint"
                     android:text="@string/label_oem_max_speed_summary" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swBetaChannel"
+                    style="@style/Choice"
+                    android:layout_width="wrap_content"
+                    app:switchPadding="@dimen/switch_padding"
+                    android:background="@null"
+                    android:thumb="@drawable/switch_thumb_selector"
+                    app:track="@drawable/switch_track_selector"
+                    android:text="@string/label_beta_channel" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:text="@string/label_beta_channel_summary" />
             </LinearLayout>
         </LinearLayout>
 
@@ -365,6 +379,12 @@
                 style="@style/TonalButtonCell"
                 android:text="@string/btn_test_clip" />
         </LinearLayout>
+
+        <Button
+            android:id="@+id/btnCheckUpdates"
+            style="@style/TonalButton"
+            android:layout_marginTop="@dimen/row_gap"
+            android:text="@string/btn_check_updates" />
 
         <!-- What acts on the factory app, kept apart from what acts on this one: they were
              under the same heading, which read as if these buttons touched the 360 app too. -->
@@ -408,14 +428,32 @@
             android:fontFamily="monospace"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/mono_size" />
-        <TextView
-            android:id="@+id/tvVersion"
+        <!-- The version line doubles as the update mark: tvUpdateBadge sits beside it and is
+             gone unless a check has found something newer. A dot in the corner is as loud as
+             this needs to be - nothing here should compete with the recording badge. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/row_gap"
-            android:gravity="end"
-            android:textColor="@color/text_tertiary"
-            android:textSize="@dimen/secondary_text_size" />
+            android:gravity="end|center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvUpdateBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="@dimen/row_gap"
+                android:textColor="@color/status_paused"
+                android:textSize="@dimen/secondary_text_size"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tvVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_tertiary"
+                android:textSize="@dimen/secondary_text_size" />
+        </LinearLayout>
 
     </LinearLayout>
 </ScrollView>

@@ -9,6 +9,12 @@
 
     <!-- Only for the diagnostics probe, which sends nothing without an explicit confirmation. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Installing an update. The system installer will not accept a package from
+         this app until the user has allowed it under "install unknown apps", which the
+         update flow asks for before it spends the download. -->
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -88,6 +94,25 @@
                 <action android:name="com.drivehub.kamera.action.TRIGGER_DASHCAM_EVENT" />
             </intent-filter>
         </receiver>
+
+        <!-- Serves a downloaded APK to the system installer via a content:// URI, for when the
+             silent path is not available. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+
+        <!-- Where an install session reports back, including when it wants the user to
+             confirm: that message has to be acted on or the update silently does not happen. -->
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

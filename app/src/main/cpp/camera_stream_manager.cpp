@@ -109,6 +109,62 @@ namespace camera_stream_manager
             return std::string(text);
         }
 
+        /**
+         * Persists the directory entry, not just the bytes.
+         *
+         * <p>fsync on the file writes its contents and its metadata; the name that points at it
+         * lives in the parent directory, and that needs a sync of its own, or a clip can
+         * survive a power cut with nothing referring to it.
+         */
+        void syncDirectoryOf(const std::string &path)
+        {
+            const size_t cut = path.find_last_of('/');
+            if (cut == std::string::npos || cut == 0)
+            {
+                return;
+            }
+            int dirFd = open(path.substr(0, cut).c_str(), O_RDONLY | O_DIRECTORY);
+            if (dirFd < 0)
+            {
+                return;
+            }
+            fsync(dirFd);
+            close(dirFd);
+        }
+
+        /**
+         * Puts the finished clip on the device, without making the next one wait for it.
+         *
+         * <p>Closing a descriptor does not write anything out: the clip sits in the page cache,
+         * and on this head unit the power can go before the kernel gets round to it. Thirty
+         * seconds of video is tens of megabytes plus the FAT entries describing it, and losing
+         * half of that is how a stick comes back mounted read-only on the next drive - which
+         * has happened on both of the sticks in use.
+         *
+         * <p>fsync blocks until the stick has actually taken the data, and a slow stick can
+         * take seconds over it. Doing that between two segments would put a hole in the
+         * recording every thirty seconds to avoid an occasional corruption that a reinsertion
+         * repairs, which for a dashcam is the wrong way round: the hole is road nobody filmed.
+         * So the descriptor is handed to a thread of its own and the next segment starts at
+         * once. The only cost is one more file open for as long as the flush takes.
+         */
+        void flushAndCloseInBackground(int fd, const std::string &path)
+        {
+            if (fd < 0)
+            {
+                return;
+            }
+            std::thread([fd, path]()
+                        {
+                if (fsync(fd) != 0)
+                {
+                    logw("fsync failed on %s: %s", path.c_str(), strerror(errno));
+                }
+                close(fd);
+                syncDirectoryOf(path); })
+                .detach();
+        }
+
         int64_t nowUs()
         {
             using namespace std::chrono;
@@ -350,7 +406,7 @@ namespace camera_stream_manager
 
                 if (outFd_ >= 0)
                 {
-                    close(outFd_);
+                    flushAndCloseInBackground(outFd_, outputPath_);
                     outFd_ = -1;
                 }
 
@@ -811,7 +867,7 @@ namespace camera_stream_manager
 
                 if (outFd_ >= 0)
                 {
-                    close(outFd_);
+                    flushAndCloseInBackground(outFd_, outputPath_);
                     outFd_ = -1;
                 }
 

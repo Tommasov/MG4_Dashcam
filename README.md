@@ -61,10 +61,12 @@ all. See [Relationship to upstream](#relationship-to-upstream).
   [The factory app's hidden recorder](#the-factory-apps-hidden-recorder).
 - Sends a diagnostics report, on request and after a confirmation - see
   [Diagnostics](#diagnostics).
+- **Updates itself**, so a new version does not mean another trip to this page - see
+  [Updating](#updating).
 - Speaks English and Italian, and follows the head unit between its light and dark themes.
 
 What it deliberately does **not** do: tile view, turn-signal overlay, digital rearview mirror,
-floating banners, in-app updates. Those are upstream's, and upstream is where they belong.
+floating banners. Those are upstream's, and upstream is where they belong.
 
 ## What a recording looks like
 
@@ -323,6 +325,35 @@ So the missing lines are recoverable, and the way to do it is the hardware path 
 already uses — it holds 25 fps while doing so. The full evidence, the method for reproducing it
 and a software attempt that was measured and then parked are on the
 [`grid-2x2`](../../tree/grid-2x2/docs) branch, where the next major version is being built.
+
+## Updating
+
+From 1.0.3 the app can fetch and install its own updates, because the alternative is telling
+somebody parked in a car park to come back to GitHub on a phone and sideload an APK.
+
+**What it contacts, and when.** A manifest of a few hundred bytes at
+`ws2.tommasovietina.it/mg4/MG4_Dashcam/version.json`, at most once a day, and only while the
+main screen is open. It carries nothing about the car, the phone or the driver: it is a GET for
+a static file. The answer is written down and the only thing that happens is a small amber mark
+beside the version number in the corner of the screen - no dialog, no notification, nothing that
+interrupts. **Check for updates** under Tools asks immediately and says what it found either
+way.
+
+**What it downloads, and when.** Nothing, until somebody presses Install. Then the APK is
+fetched, its SHA-256 is compared with the one in the manifest, and a file that does not match
+is discarded without being installed.
+
+**How it installs.** Silently. This app is signed with the platform key and runs as
+`android.uid.system`, so it holds `INSTALL_PACKAGES` and can commit an install session without
+putting anybody through the system installer's two screens. Where that is refused it falls back
+to the ordinary installer.
+
+**The beta channel** is a developer setting, deliberately not an ordinary one: it offers builds
+that have not been driven yet. Turning it on switches the manifest to `version-beta.json` and
+forgets what the other channel had found.
+
+If none of this appeals, it is all inert until used: the daily check can only light a mark, and
+nothing installs without a press.
 
 ## Diagnostics
 

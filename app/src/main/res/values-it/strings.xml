@@ -126,6 +126,7 @@
     <string name="dashcam_recording_error_overlay_subtitle_start_failed">Telecamere non disponibili</string>
     <string name="dashcam_recording_error_overlay_subtitle_stop_failed">Spezzone non chiuso</string>
     <string name="dashcam_recording_error_overlay_subtitle_usb_unavailable">USB non disponibile</string>
+    <string name="dashcam_recording_error_overlay_subtitle_usb_read_only">USB in sola lettura</string>
     <string name="dashcam_recording_error_overlay_subtitle_usb_fallback">Passata alla memoria interna</string>
     <string name="dashcam_recording_error_overlay_subtitle_stalled">Registrazione bloccata</string>
     <string name="dashcam_recording_error_overlay_subtitle_crash_loop">La registrazione si blocca subito</string>
@@ -136,9 +137,25 @@
     <string name="notification_dashcam_recording_error_start_failed_text">Non è stato possibile aprire le telecamere.</string>
     <string name="notification_dashcam_recording_error_stop_failed_text">L\'ultimo spezzone non è stato chiuso correttamente.</string>
     <string name="notification_dashcam_recording_error_usb_unavailable_text">La chiavetta USB non c\'è più e la destinazione è solo USB.</string>
+    <string name="notification_dashcam_recording_error_usb_read_only_text">La chiavetta USB scelta è montata in sola lettura. Toglila e reinseriscila.</string>
     <string name="notification_dashcam_recording_error_usb_fallback_text">La USB non c\'è più; la registrazione continua sulla memoria interna.</string>
 
     <!-- Espulsione USB -->
     <string name="settings_dashcam_storage_eject_ready_message">Puoi rimuovere la chiavetta USB.</string>
     <string name="settings_dashcam_storage_eject_unavailable_message">Nessuna chiavetta USB in uso.</string>
+    <string name="btn_check_updates">Cerca aggiornamenti</string>
+    <string name="btn_update_install">Installa</string>
+    <string name="label_beta_channel">Canale beta</string>
+    <string name="label_beta_channel_summary">Propone versioni non ancora provate su strada. Lascialo spento se non stai collaudando.</string>
+    <string name="update_badge">Aggiornamento: %1$s</string>
+    <string name="update_available_title">È disponibile la versione %1$s</string>
+    <string name="update_up_to_date">Già aggiornata.</string>
+    <string name="update_check_failed">Controllo non riuscito: %1$s</string>
+    <string name="update_checking">Controllo in corso…</string>
+    <string name="update_downloading">Scaricamento %1$d%%</string>
+    <string name="update_download_failed">Scaricamento non riuscito: %1$s</string>
+    <string name="update_checksum_failed">Il file scaricato non corrisponde alla sua impronta. Non è stato installato niente.</string>
+    <string name="update_permission_title">Prima serve un permesso</string>
+    <string name="update_permission_message">Android non lascia installare un aggiornamento a questa app finché non glielo consenti fra le \"app da fonti sconosciute\". Apri l\'impostazione, attivala, poi torna qui e premi di nuovo Installa.</string>
+    <string name="update_permission_open_settings">Apri l\'impostazione</string>
 </resources>

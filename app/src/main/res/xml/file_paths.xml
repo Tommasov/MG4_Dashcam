@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Maps the app-private external "updates" dir where a downloaded APK is saved, so it can
+         be handed to the system package installer as a content:// URI. Only used when the
+         silent install path is unavailable; the path must match ApkDownloader.SUBDIR. -->
+    <external-files-path name="updates" path="updates/" />
+</paths>
