@@ -148,6 +148,38 @@ public class RecordingService extends Service {
     private final Object stateLock = new Object();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService eventCopyExecutor = Executors.newSingleThreadExecutor();
+
+    /**
+     * Everything that used to happen between two clips, moved off the gap.
+     *
+     * <p>Deleting an expired 34 MB clip, writing the event state, and probing the volume - which
+     * writes a file, fsyncs it and deletes it - all ran after one segment had stopped and before
+     * the next had started. The cameras were running the whole time and nothing was being
+     * recorded: measured on the road, a second of road missing every thirty, seventeen times in
+     * a half-hour drive.
+     *
+     * <p>None of it has to be there. Retention and bookkeeping happen once the next clip is
+     * already recording, and the volume is re-probed while the current one still is.
+     */
+    private final ExecutorService housekeepingExecutor = Executors.newSingleThreadExecutor();
+
+    /**
+     * The hole between two clips, and the three things that make it up.
+     *
+     * <p>Measured from the moment one clip's muxer closes to the moment the next clip's encoder
+     * is running, because that is exactly the stretch of road nobody filmed.
+     */
+    /** The clip being written right now, so retention running in parallel does not count it. */
+    private volatile String recordingBaseName;
+
+    private long clipStoppedAtMs;
+    private long lastStopMs;
+    private long lastResolveMs;
+
+    /** The storage decision for the next segment, worked out during the current one. */
+    private volatile File prefetchedBaseDir;
+    private volatile boolean prefetchedBaseIsUsb;
+    private volatile boolean prefetchInFlight;
     private volatile Thread worker;
     private volatile boolean stopRequested = false;
     private volatile boolean segmentStopRequested = false;
@@ -704,18 +736,27 @@ public class RecordingService extends Service {
             // Re-resolve between segments so USB hot-plug/unplug and settings changes are
             // picked up. AUTO mode switches targets with a banner; USB_ONLY mode turns a
             // missing medium into a fatal error.
-            File resolved = resolveActiveBaseDir(false);
+            // Worked out during the previous segment, while the cameras were still recording.
+            // Only the first pass, and a pass where the prefetch did not finish in time, pays
+            // for the probe here.
+            final long resolveStartMs = SystemClock.elapsedRealtime();
+            File resolved = takePrefetchedBaseDir();
+            if (resolved == null) {
+                resolved = resolveActiveBaseDir(false);
+            }
             if (resolved == null) {
                 endedWithFatalError = true;
                 break;
             }
             baseDir = resolved;
+            final long resolveMs = SystemClock.elapsedRealtime() - resolveStartMs;
 
             // Read every iteration so settings edits take effect between segments. USB and
             // internal storage carry separate retention limits.
             int keepSegments = DashcamStorageManager.getActiveRetentionClipCount(prefs, activeBaseIsUsb);
             long segmentStartWallMs = System.currentTimeMillis();
             String baseName = makeTimestampBase(segmentStartWallMs, "yyMMddHHmmss");
+            lastResolveMs = resolveMs;
             boolean startedAnyCamera = recordClip(baseDir, segmentMs, baseName, keepSegments);
             if (!startedAnyCamera) {
                 // A clip cut short because the factory camera asked for the devices often fails
@@ -736,7 +777,15 @@ public class RecordingService extends Service {
                 endedWithFatalError = true;
                 break;
             }
-            onSegmentCompleted(baseDir, baseName, segmentStartWallMs, System.currentTimeMillis(), keepSegments);
+            // Retention and bookkeeping run while the next clip is already being recorded.
+            final File doneDir = baseDir;
+            final String doneName = baseName;
+            final long doneStart = segmentStartWallMs;
+            final long doneEnd = System.currentTimeMillis();
+            final int doneKeep = keepSegments;
+            lastSegmentCompletedMs = doneEnd;
+            housekeepingExecutor.execute(
+                    () -> onSegmentCompleted(doneDir, doneName, doneStart, doneEnd, doneKeep));
 
             // Check whether recording has been disabled in prefs.
             enabled = prefs.getBoolean(DashcamSettings.KEY_ENABLED, false);
@@ -805,6 +854,64 @@ public class RecordingService extends Service {
         stopServiceIfNotEjecting();
     }
 
+    /**
+     * Works out where the next clip goes, while the current one is still recording.
+     *
+     * <p>Re-resolving between segments is not optional: it is what notices a stick pulled out,
+     * a stick that came back read-only, and a change of target in the settings. But it writes a
+     * file to the volume, fsyncs it and deletes it again, which on a slow stick is most of the
+     * hole between two clips. Doing it a segment early costs nothing - the cameras are busy
+     * anyway - and the answer is ready when the rotation comes.
+     *
+     * <p>Deliberately not cached across a whole drive: the probe still runs once per segment,
+     * so a volume that fails half way through a journey is still caught within thirty seconds.
+     */
+    private void schedulePrefetch() {
+        if (prefetchInFlight) {
+            return;
+        }
+        prefetchInFlight = true;
+        prefetchedBaseDir = null;
+        housekeepingExecutor.execute(() -> {
+            try {
+                DashcamStorageManager.Resolution res = DashcamStorageManager.resolve(this);
+                if (res.baseDir != null && ensureDirectoryExists(res.baseDir, "records base dir")
+                        && res.baseDir.canWrite()) {
+                    prefetchedBaseIsUsb = res.usingUsb;
+                    prefetchedBaseDir = res.baseDir;
+                }
+            } catch (Throwable t) {
+                // A failed prefetch is not a failure: the loop resolves synchronously instead,
+                // which is exactly what it did before any of this existed.
+                Log.w(TAG, "storage prefetch", t);
+            } finally {
+                prefetchInFlight = false;
+            }
+        });
+    }
+
+    /**
+     * The prefetched target, or null if there is not one ready. Consumed once: a stale answer
+     * from two segments ago is worse than resolving again.
+     */
+    private File takePrefetchedBaseDir() {
+        File dir = prefetchedBaseDir;
+        prefetchedBaseDir = null;
+        if (dir == null || prefetchInFlight) {
+            return null;
+        }
+        boolean wasUsb = activeBaseIsUsb;
+        boolean hadPrevious = activeBaseDir != null;
+        activeBaseDir = dir;
+        activeBaseIsUsb = prefetchedBaseIsUsb;
+        if (hadPrevious && wasUsb != prefetchedBaseIsUsb) {
+            // The same announcement resolveActiveBaseDir makes when the target changes under it.
+            DevRuntimeLog.add("RecordingService",
+                    "storage target changed to " + (prefetchedBaseIsUsb ? "usb" : "internal"));
+        }
+        return dir;
+    }
+
     private boolean recordClip(File baseDir, long durationMs, String baseName, int keepSegments) {
         SharedPreferences prefs = prefs();
         int recordingFps = DashcamSettings.getRecordingFps(prefs);
@@ -813,6 +920,8 @@ public class RecordingService extends Service {
         int cameraMask = DashcamSettings.getRecordingCameraMask(prefs);
         int selectedCameraCount = DashcamSettings.getRecordingCameraCount(cameraMask);
         File outputFile = new File(baseDir, baseName + ".mp4");
+        recordingBaseName = baseName;
+        final long startCallMs = SystemClock.elapsedRealtime();
         boolean started = CameraProbe.startCombinedMp4Record(
                 outputFile.getAbsolutePath(),
                 CELL_WIDTH,
@@ -832,6 +941,14 @@ public class RecordingService extends Service {
         publishStatus(STATUS_RECORDING, selectedCameraCount, TOTAL_CAMERAS, "");
 
         long start = SystemClock.elapsedRealtime();
+        if (clipStoppedAtMs > 0) {
+            DevRuntimeLog.add("RecordingService", String.format(Locale.US,
+                    "rotation gap %dms = stop %d + resolve %d + start %d",
+                    start - clipStoppedAtMs, lastStopMs, lastResolveMs, start - startCallMs));
+        }
+        // Work out where the next clip goes while this one is still recording, so the answer is
+        // waiting at the rotation instead of being computed in the hole.
+        schedulePrefetch();
         while (!stopRequested
                 && !segmentStopRequested
                 && (SystemClock.elapsedRealtime() - start) < durationMs) {
@@ -844,7 +961,11 @@ public class RecordingService extends Service {
             }
         }
 
-        if (!CameraProbe.stopCombinedMp4Record()) {
+        final long stopCallMs = SystemClock.elapsedRealtime();
+        boolean stopped = CameraProbe.stopCombinedMp4Record();
+        clipStoppedAtMs = SystemClock.elapsedRealtime();
+        lastStopMs = clipStoppedAtMs - stopCallMs;
+        if (!stopped) {
             // The muxer never closed, so whatever is on disk has no index and no player will
             // open it. Leaving it would also cost a retention slot, pushing out a clip that can
             // actually be watched.
@@ -1146,6 +1267,13 @@ public class RecordingService extends Service {
             }
             copyJobs = collectEventCopyJobsLocked(segmentOrdinal);
             Set<String> protectedBases = collectProtectedBasesLocked();
+            // Retention now runs while the next clip is already being written, so that clip is
+            // sitting in the directory as this counts. Without protecting it the count is one
+            // too high and the oldest good clip is thrown away a segment early.
+            String inProgress = recordingBaseName;
+            if (inProgress != null) {
+                protectedBases.add(inProgress);
+            }
             cleanupOldSegments(baseDir, keepSegments, protectedBases);
             persistEventStateLocked();
         }
@@ -1681,6 +1809,7 @@ public class RecordingService extends Service {
             }
         }
         eventCopyExecutor.shutdown();
+        housekeepingExecutor.shutdown();
         try {
             return eventCopyExecutor.awaitTermination(5000, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
