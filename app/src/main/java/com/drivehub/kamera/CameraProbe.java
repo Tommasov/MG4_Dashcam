@@ -67,8 +67,26 @@ public final class CameraProbe {
             boolean showSpeed,
             int cameraMask);
 
-    /** Stops the currently running combined grid recording. */
-    public static native boolean stopCombinedMp4Record();
+    /**
+     * Stops the currently running combined grid recording.
+     *
+     * @param keepCamerasWarm true only when another clip is about to start immediately. The four
+     *                        video devices are then left open and streaming with nothing reading
+     *                        from them, so the next clip does not pay to reopen them. Any stop
+     *                        that really means it - the service stopping, the screen going off,
+     *                        the factory 360 view asking for the cameras - passes false, and the
+     *                        devices are released before this call returns.
+     */
+    public static native boolean stopCombinedMp4Record(boolean keepCamerasWarm);
+
+    /**
+     * Releases cameras left open by {@link #stopCombinedMp4Record(boolean)} with the hold set.
+     *
+     * <p>Idempotent and cheap: it does nothing if no hold is outstanding. Called wherever the
+     * recording loop stops meaning to start another clip, so the devices never linger for a
+     * rotation that is not coming.
+     */
+    public static native void releaseCombinedCameras();
 
     /** Updates the current speed shown in the active combined recording overlay. */
     public static native void updateCombinedRecordingSpeed(int speedKmh);

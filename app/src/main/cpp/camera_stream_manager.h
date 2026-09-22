@@ -16,7 +16,9 @@ bool stopRecording(int slot);
 bool startCombinedRecording(JNIEnv* env, const std::string& outputPath,
                             int cellWidth, int cellHeight, int fps, int bitrate,
                             const std::string& signature, bool showSpeed, int cameraMask);
-bool stopCombinedRecording();
+bool stopCombinedRecording(bool keepCamerasWarm);
+/** Ends a hold left over from a rotation that is not going to produce another clip. */
+void releaseCombinedCameras();
 
 /** Shows the composed grid live on a Surface - the same canvas that recording writes. */
 bool attachCombinedPreview(JNIEnv* env, jobject surface, int cellWidth, int cellHeight,

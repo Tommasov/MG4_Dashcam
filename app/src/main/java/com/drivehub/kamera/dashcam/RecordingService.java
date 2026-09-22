@@ -685,7 +685,8 @@ public class RecordingService extends Service {
             sWorkerActive = false;
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_LOOP_DIED);
             try {
-                CameraProbe.stopCombinedMp4Record();
+                CameraProbe.stopCombinedMp4Record(false);
+                CameraProbe.releaseCombinedCameras();
             } catch (Throwable ignored) {
                 // the encoder may already be gone; nothing useful to do here
             }
@@ -793,6 +794,9 @@ public class RecordingService extends Service {
                 break;
         }
 
+        // Whatever ended the loop - the switch turned off, a stick that never came back, a
+        // fatal error - no further clip is coming, so nothing may still be holding a camera.
+        CameraProbe.releaseCombinedCameras();
         worker = null;
         sWorkerActive = false;
         if (!endedWithFatalError) {
@@ -846,6 +850,7 @@ public class RecordingService extends Service {
             remainingSegments--;
         }
 
+        CameraProbe.releaseCombinedCameras();
         futureOnlyEventSession = false;
         worker = null;
         if (!endedWithFatalError) {
@@ -961,8 +966,18 @@ public class RecordingService extends Service {
             }
         }
 
+        // The cameras stay open only for a plain rotation, where the next clip starts within
+        // milliseconds. Reopening four video devices was measured at 254 ms of the 640 ms hole
+        // between one clip and the next - by far the largest part of it, and spent reopening
+        // devices that had just been closed with the same format.
+        //
+        // Every other way out of the wait above is a stop that means it: the service going
+        // down, the screen going off, or the factory 360 view waiting for the devices. Those
+        // pass false and the cameras are released before this call returns, because a device we
+        // still hold is one the factory app cannot open.
+        final boolean rotating = !stopRequested && !segmentStopRequested && !oemPauseRequested;
         final long stopCallMs = SystemClock.elapsedRealtime();
-        boolean stopped = CameraProbe.stopCombinedMp4Record();
+        boolean stopped = CameraProbe.stopCombinedMp4Record(rotating);
         clipStoppedAtMs = SystemClock.elapsedRealtime();
         lastStopMs = clipStoppedAtMs - stopCallMs;
         if (!stopped) {
@@ -1000,6 +1015,10 @@ public class RecordingService extends Service {
                 && oemPauseRequested) {
             segmentStopRequested = true;
             if (!announcedPause) {
+                // A rotation that ended a moment ago may still be holding the four cameras open
+                // for a clip that is now not going to start. The factory view is waiting for
+                // exactly those devices, so the hold goes first and the banner second.
+                CameraProbe.releaseCombinedCameras();
                 publishStatus(STATUS_PAUSED_OEM, 0, TOTAL_CAMERAS, "");
                 announcedPause = true;
             }
@@ -1011,6 +1030,7 @@ public class RecordingService extends Service {
             }
         }
         if (stopRequested || !prefs.getBoolean(DashcamSettings.KEY_ENABLED, false)) {
+            CameraProbe.releaseCombinedCameras();
             return false;
         }
         segmentStopRequested = false;
@@ -1790,7 +1810,8 @@ public class RecordingService extends Service {
             for (int s = 0; s < 4; s++) {
                 CameraProbe.stopMp4Record(s);
             }
-            CameraProbe.stopCombinedMp4Record();
+            CameraProbe.stopCombinedMp4Record(false);
+            CameraProbe.releaseCombinedCameras();
         } catch (Throwable ignored) {
         }
         if (worker != null) {

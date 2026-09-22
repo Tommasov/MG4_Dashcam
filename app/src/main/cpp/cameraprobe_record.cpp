@@ -129,10 +129,20 @@ Java_com_drivehub_kamera_CameraProbe_startCombinedMp4Record(JNIEnv* env, jclass 
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_drivehub_kamera_CameraProbe_stopCombinedMp4Record(JNIEnv* /*env*/, jclass /*clazz*/) {
+Java_com_drivehub_kamera_CameraProbe_stopCombinedMp4Record(JNIEnv* /*env*/, jclass /*clazz*/,
+                                                           jboolean keepCamerasWarm) {
     return guarded("stopCombinedMp4Record", [&]() -> bool {
-        return camera_stream_manager::stopCombinedRecording();
+        return camera_stream_manager::stopCombinedRecording(keepCamerasWarm == JNI_TRUE);
     }) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_drivehub_kamera_CameraProbe_releaseCombinedCameras(JNIEnv* /*env*/, jclass /*clazz*/) {
+    guarded("releaseCombinedCameras", []() -> bool {
+        camera_stream_manager::releaseCombinedCameras();
+        return true;
+    });
 }
 
 extern "C"

@@ -50,6 +50,18 @@ namespace camera_stream_manager
         static constexpr const char *TAG = "CameraStreamManager";
         static constexpr int PREVIEW_SELECT_TIMEOUT_US = 100000;
         static constexpr int STOP_WAIT_MS = 2500;
+
+        /**
+         * How long a camera may be held open with nothing reading from it, while the recorder
+         * swaps one clip for the next.
+         *
+         * <p>A rotation that goes to plan reclaims the camera in well under a tenth of a second.
+         * This is not that budget - it is the safety net for the rotation that never comes back:
+         * a loop that died, a stick that vanished, a pause that arrived in the gap. A camera we
+         * still hold is a camera the factory 360 view cannot open, so the hold has to expire on
+         * its own rather than wait to be told.
+         */
+        static constexpr int KEEP_WARM_HOLD_MS = 2000;
         static constexpr int COLOR_FORMAT_YUV420_PLANAR = 19;
         static constexpr int COLOR_FORMAT_YUV420_SEMIPLANAR = 21;
 
@@ -2182,8 +2194,8 @@ namespace camera_stream_manager
                 bool shouldStop = false;
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
-                    consumers_.erase(consumerId); // <- das ist der Fix
-                    shouldStop = (previewWindow_ == nullptr && consumers_.empty());
+                    consumers_.erase(consumerId);
+                    shouldStop = (previewWindow_ == nullptr && consumers_.empty() && !keepWarm_);
                     if (shouldStop)
                     {
                         stopRequested_.store(true);
@@ -2199,13 +2211,69 @@ namespace camera_stream_manager
             bool isIdle()
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                return previewWindow_ == nullptr && consumers_.empty() && !running_.load();
+                return previewWindow_ == nullptr && consumers_.empty() && !running_.load()
+                       && !keepWarm_;
+            }
+
+            /**
+             * Holds the camera open across a clip rotation, or lets it go.
+             *
+             * <p>Rotating a clip used to close all four video devices and reopen them a fifth of
+             * a second later, identically: the session counts its consumers, the recorder was the
+             * only one, and a session nobody reads from tears its capture down. Measured on the
+             * car, that teardown and rebuild was 254 ms of the 640 ms hole between one clip and
+             * the next - road that simply was not filmed, seventy-eight times an hour.
+             *
+             * <p>With the hold set the capture thread keeps running with nothing attached to it,
+             * which costs a dequeue and a requeue per frame and no copying at all: the expensive
+             * part of the loop is skipped when there is nobody to hand a frame to.
+             *
+             * <p>Releasing tears the capture down at once when nothing else is using the camera.
+             * That is what makes it safe to set: every path that really means to stop - the
+             * service stopping, the screen going off, the factory 360 view asking for the
+             * devices - releases, and the camera is gone by the time the call returns.
+             */
+            void setKeepWarm(bool warm)
+            {
+                bool release = false;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    keepWarm_ = warm;
+                    keepWarmDeadlineUs_ = warm ? nowUs() + KEEP_WARM_HOLD_MS * 1000LL : 0;
+                    release = !warm && !hasConsumersLocked();
+                }
+                if (release)
+                {
+                    requestStopAndJoin();
+                }
             }
 
         private:
             bool hasConsumersLocked() const
             {
                 return previewWindow_ != nullptr || !consumers_.empty();
+            }
+
+            /**
+             * Drops a hold the recorder asked for and never came back to claim.
+             *
+             * <p>Runs from the capture loop's housekeeping, so it is checked about four times a
+             * second - late enough to cost nothing, soon enough that a camera is never held for
+             * long by a recorder that has gone away.
+             */
+            void expireKeepWarmLocked()
+            {
+                if (!keepWarm_ || nowUs() < keepWarmDeadlineUs_)
+                {
+                    return;
+                }
+                logw("/dev/video%d: keep-warm hold lapsed, releasing the camera", videoIndex_);
+                keepWarm_ = false;
+                keepWarmDeadlineUs_ = 0;
+                if (!hasConsumersLocked())
+                {
+                    stopRequested_.store(true);
+                }
             }
 
             void configurePreviewWindowLocked()
@@ -2592,6 +2660,7 @@ namespace camera_stream_manager
                             bool shouldExit = false;
                             {
                                 std::lock_guard<std::mutex> lock(mutex_);
+                                expireKeepWarmLocked();
                                 shouldExit = stopRequested_.load() && !hasConsumersLocked();
                             }
                             if (shouldExit)
@@ -2806,6 +2875,9 @@ namespace camera_stream_manager
             std::unordered_map<int, std::shared_ptr<FrameConsumer>> consumers_;
             std::atomic<bool> running_{false};
             std::atomic<bool> stopRequested_{false};
+            /** Set while the recorder is between clips and means to come straight back. */
+            bool keepWarm_ = false;
+            int64_t keepWarmDeadlineUs_ = 0;
             std::thread worker_;
             cv::Mat rgbaScratch_;
             // Deinterlacing scratch. Allocated once and reused: four cameras at 25 fps is no
@@ -2982,6 +3054,25 @@ namespace camera_stream_manager
         return true;
     }
 
+    /**
+     * Ends any hold left over from the previous clip.
+     *
+     * <p>Called on every way out of starting one: once the new sink is attached the cameras have
+     * a real reader again and the hold has done its job, and if the start failed they must not
+     * stay held for a recording that is not happening.
+     */
+    void releaseKeepWarm()
+    {
+        for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
+        {
+            auto session = getSession(COMBINED_VIDEO_INDICES[i]);
+            if (session != nullptr)
+            {
+                session->setKeepWarm(false);
+            }
+        }
+    }
+
     /** Detaches whatever the combined sink was using. Caller must not hold gCombinedMutex. */
     bool detachCombinedSessions()
     {
@@ -3047,11 +3138,14 @@ namespace camera_stream_manager
             showSpeed);
         if (!sink->initialize())
         {
+            // Nothing is going to read from a camera being held for a clip that will not exist.
+            releaseKeepWarm();
             return false;
         }
 
         if (!attachCombinedSinkLocked(sink, normalizedMask))
         {
+            releaseKeepWarm();
             return false;
         }
 
@@ -3063,6 +3157,7 @@ namespace camera_stream_manager
         }
         gCombinedSink = sink;
         gCombinedRecordingActive = true;
+        releaseKeepWarm();
         logi("combined recording attached with camera mask 0x%x", normalizedMask);
         return true;
     }
@@ -3172,7 +3267,13 @@ namespace camera_stream_manager
         return detached && stopped;
     }
 
-    bool stopCombinedRecording()
+    void releaseCombinedCameras()
+    {
+        std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
+        releaseKeepWarm();
+    }
+
+    bool stopCombinedRecording(bool keepCamerasWarm)
     {
         std::shared_ptr<CombinedRecordingSink> sink;
         {
@@ -3196,10 +3297,18 @@ namespace camera_stream_manager
             {
                 continue;
             }
+            // Asked for before the consumer leaves, not after: a session watches its own
+            // consumer count, and by the time stopConsumer() returns a camera nobody holds has
+            // already been streamed off, unmapped and closed.
+            if (keepCamerasWarm)
+            {
+                session->setKeepWarm(true);
+            }
             if (!session->stopConsumer(COMBINED_CONSUMER_ID_BASE + static_cast<int>(i)))
             {
                 allConsumersStopped = false;
             }
+            // A session on hold does not report itself idle, so this leaves it in the map.
             eraseSessionIfIdle(videoIndex, session);
         }
 
