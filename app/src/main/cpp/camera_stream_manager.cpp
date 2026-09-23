@@ -216,6 +216,24 @@ namespace camera_stream_manager
         /** Where the encoder thread's time goes, one figure per stage. */
         long long gSnapUs = 0, gFooterUs = 0, gFeedUs = 0, gDrainUs = 0, gEncodeCount = 0;
 
+        /**
+         * Opening a clip, split in two.
+         *
+         * <p>The gap between clips is now dominated by the start call, and the start call does
+         * two unrelated things: it builds an encoder and a muxer - which means creating the
+         * output file on the stick - and it attaches four cameras. Until these are timed apart
+         * the number says only "slow", and the last two builds were spent guessing which half.
+         */
+        long long gClipEncoderUs = 0, gClipCamerasUs = 0, gClipStartCount = 0;
+
+        void countClipStart(long long encoderUs, long long camerasUs)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gClipEncoderUs += encoderUs;
+            gClipCamerasUs += camerasUs;
+            gClipStartCount++;
+        }
+
         /** Asked for, and actually got: a sleep on a loaded system is a lower bound. */
         long long gSleepAskedUs = 0, gSleepGotUs = 0, gSleepCount = 0;
 
@@ -344,11 +362,27 @@ namespace camera_stream_manager
          * So the descriptor is handed to a thread of its own and the next segment starts at
          * once. The only cost is one more file open for as long as the flush takes.
          */
+        /**
+         * How many clips are still being pushed to the medium.
+         *
+         * <p>The flush below runs detached, which is right on the rotation path - up to 34 MB
+         * of fsync has no business blocking the start of the next clip. It is wrong at
+         * shutdown: the app reported "clip closed before standby" while these threads were
+         * still writing, so the one moment it was meant to make safe was the one it lied about.
+         */
+        std::mutex gFlushMutex;
+        std::condition_variable gFlushCv;
+        int gFlushesInFlight = 0;
+
         void flushAndCloseInBackground(int fd, const std::string &path)
         {
             if (fd < 0)
             {
                 return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(gFlushMutex);
+                gFlushesInFlight++;
             }
             std::thread([fd, path]()
                         {
@@ -357,7 +391,12 @@ namespace camera_stream_manager
                     logw("fsync failed on %s: %s", path.c_str(), strerror(errno));
                 }
                 close(fd);
-                syncDirectoryOf(path); })
+                syncDirectoryOf(path);
+                {
+                    std::lock_guard<std::mutex> lock(gFlushMutex);
+                    gFlushesInFlight--;
+                }
+                gFlushCv.notify_all(); })
                 .detach();
         }
 
@@ -2089,7 +2128,7 @@ namespace camera_stream_manager
                         ANativeWindow_release(previewWindow_);
                         previewWindow_ = nullptr;
                     }
-                    shouldStop = consumers_.empty();
+                    shouldStop = consumers_.empty() && !keepWarm_;
                     if (shouldStop)
                     {
                         stopRequested_.store(true);
@@ -2490,7 +2529,13 @@ namespace camera_stream_manager
                             ++it;
                         }
                     }
-                    if (previewWindow_ == nullptr && consumers_.empty())
+                    // The second place that decides a camera nobody reads from should go
+                    // down, and the one that made the first attempt at this useless: a rotation
+                    // set the hold, stopConsumer() honoured it, and a quarter of a second later
+                    // this ran from the capture loop's own housekeeping and stopped the camera
+                    // anyway. Measured on a 21-minute drive: the cameras were down for 169 s of
+                    // it, against 168 s of rotations. The hold held nothing.
+                    if (previewWindow_ == nullptr && consumers_.empty() && !keepWarm_)
                     {
                         stopRequested_.store(true);
                     }
@@ -2766,6 +2811,12 @@ namespace camera_stream_manager
                 cleanupStoppedConsumers();
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
+                    // Whatever brought the loop down, the hold goes with it. It exists to keep
+                    // a capture alive; over a capture that has already ended it would only
+                    // keep the session from ever reporting itself idle, and the expiry that
+                    // should have cleared it runs from this very loop.
+                    keepWarm_ = false;
+                    keepWarmDeadlineUs_ = 0;
                     cleanupCaptureLocked();
                     running_.store(false);
                 }
@@ -3136,18 +3187,21 @@ namespace camera_stream_manager
             bitrate,
             signature,
             showSpeed);
+        const int64_t encoderStartUs = nowUs();
         if (!sink->initialize())
         {
             // Nothing is going to read from a camera being held for a clip that will not exist.
             releaseKeepWarm();
             return false;
         }
+        const int64_t camerasStartUs = nowUs();
 
         if (!attachCombinedSinkLocked(sink, normalizedMask))
         {
             releaseKeepWarm();
             return false;
         }
+        countClipStart(camerasStartUs - encoderStartUs, nowUs() - camerasStartUs);
 
         // A preview that was running on its own composer hands its window to the recording one,
         // so starting to record does not blank the screen somebody is watching.
@@ -3267,6 +3321,13 @@ namespace camera_stream_manager
         return detached && stopped;
     }
 
+    bool awaitPendingFlushes(int timeoutMs)
+    {
+        std::unique_lock<std::mutex> lock(gFlushMutex);
+        return gFlushCv.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                 [] { return gFlushesInFlight == 0; });
+    }
+
     void releaseCombinedCameras()
     {
         std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
@@ -3287,6 +3348,27 @@ namespace camera_stream_manager
             gCombinedRecordingActive = false;
         }
 
+        // Every hold goes on before the sink is told anything. A tap answers
+        // isStopRequested() with the shared sink's state, so requestStop() makes all four taps
+        // say "stopped" in the same instant - and a camera whose housekeeping runs before the
+        // loop below reaches it would drop its tap, find neither a consumer nor a hold, and
+        // take the capture down. The window is not narrow either: stopConsumer() waits for the
+        // sink itself to finish, which is the encoder draining.
+        //
+        // Measured with the holds set inside the loop instead: over 37 rotations one camera of
+        // the four stayed up and three did not, each by its own housekeeping phase.
+        if (keepCamerasWarm)
+        {
+            for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
+            {
+                auto session = getSession(COMBINED_VIDEO_INDICES[i]);
+                if (session != nullptr)
+                {
+                    session->setKeepWarm(true);
+                }
+            }
+        }
+
         sink->requestStop();
         bool allConsumersStopped = true;
         for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
@@ -3296,13 +3378,6 @@ namespace camera_stream_manager
             if (session == nullptr)
             {
                 continue;
-            }
-            // Asked for before the consumer leaves, not after: a session watches its own
-            // consumer count, and by the time stopConsumer() returns a camera nobody holds has
-            // already been streamed off, unmapped and closed.
-            if (keepCamerasWarm)
-            {
-                session->setKeepWarm(true);
             }
             if (!session->stopConsumer(COMBINED_CONSUMER_ID_BASE + static_cast<int>(i)))
             {
@@ -3382,6 +3457,15 @@ namespace camera_stream_manager
                          " feeding the codec %.1fms, draining it %.1fms\n",
                          gSnapUs / 1000.0 / gEncodeCount, gFooterUs / 1000.0 / gEncodeCount,
                          gFeedUs / 1000.0 / gEncodeCount, gDrainUs / 1000.0 / gEncodeCount);
+                out += line;
+            }
+            if (gClipStartCount > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "opening a clip: encoder and muxer %.0fms, attaching the cameras %.0fms"
+                         " (%lld times)\n",
+                         gClipEncoderUs / 1000.0 / gClipStartCount,
+                         gClipCamerasUs / 1000.0 / gClipStartCount, gClipStartCount);
                 out += line;
             }
             if (gSleepCount > 0)

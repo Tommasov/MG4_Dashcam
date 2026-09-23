@@ -5,6 +5,7 @@ import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
 import com.drivehub.kamera.dev.CrashTrail;
 import com.drivehub.kamera.dev.DevRuntimeLog;
+import com.drivehub.kamera.dev.StandbyJournal;
 import com.drivehub.kamera.update.ApkDownloader;
 import com.drivehub.kamera.update.ApkInstaller;
 import com.drivehub.kamera.update.DashcamUpdates;
@@ -42,6 +43,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import android.widget.SeekBar;
+
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
 
@@ -164,6 +167,40 @@ public class MainActivity extends AppCompatActivity {
         sendProbe.setVisibility(ProbeReport.isConfigured() ? View.VISIBLE : View.GONE);
         sendProbe.setOnClickListener(v -> confirmSendProbe());
         findViewById(R.id.btnCheckUpdates).setOnClickListener(v -> checkForUpdates());
+        SwitchCompat statusDot = findViewById(R.id.swStatusBarIcon);
+        statusDot.setChecked(UiPrefs.isStatusBarIcon(prefs()));
+        statusDot.setOnCheckedChangeListener((b, checked) -> {
+            UiPrefs.setStatusBarIcon(prefs(), checked);
+            // The service redraws the dot on its next status update, which may be a clip away.
+            // Turning a switch and seeing nothing happen reads as a switch that does nothing.
+            RecordingService.refreshStatusIcon(this);
+        });
+        SeekBar dotX = findViewById(R.id.sbStatusBarIconX);
+        dotX.setProgress(UiPrefs.getStatusBarIconX(prefs()));
+        dotX.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                if (!fromUser) {
+                    return;
+                }
+                // Live, so the dot follows the finger: a position you have to guess and then
+                // check is the thing this control exists to avoid.
+                UiPrefs.setStatusBarIconX(prefs(), value);
+                RecordingService.refreshStatusIcon(MainActivity.this);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+            }
+        });
+        SwitchCompat standby = findViewById(R.id.swStandbyDiagnostics);
+        standby.setChecked(UiPrefs.isStandbyDiagnostics(prefs()));
+        standby.setOnCheckedChangeListener(
+                (b, checked) -> UiPrefs.setStandbyDiagnostics(prefs(), checked));
         SwitchCompat beta = findViewById(R.id.swBetaChannel);
         beta.setChecked(UiPrefs.isUpdateBetaChannel(prefs()));
         beta.setOnCheckedChangeListener((b, checked) -> {
@@ -751,6 +788,8 @@ public class MainActivity extends AppCompatActivity {
                 .append(safeOemListing());
         sb.append("\n").append("== what android recorded about our deaths ==").append("\n")
                 .append(CrashTrail.describe());
+        sb.append("\n").append("== what happened at the last standby ==")
+                .append("\n").append(StandbyJournal.snapshot(this));
         sb.append("\n").append("== runtime log ==").append("\n")
                 .append(DevRuntimeLog.snapshot()).append("\n");
         return sb.toString();

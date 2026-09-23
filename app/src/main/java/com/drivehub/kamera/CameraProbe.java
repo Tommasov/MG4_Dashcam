@@ -88,6 +88,17 @@ public final class CameraProbe {
      */
     public static native void releaseCombinedCameras();
 
+    /**
+     * Waits for every finished clip to be fully on the medium.
+     *
+     * <p>Closing a clip hands the descriptor to a detached thread that fsyncs it and syncs the
+     * directory, so the next clip does not wait for up to 34 MB to land. Nobody could wait for
+     * those threads, which made the shutdown path claim the stick was idle while it was not.
+     *
+     * @return true if everything landed, false if the timeout ran out first.
+     */
+    public static native boolean awaitPendingFlushes(int timeoutMs);
+
     /** Updates the current speed shown in the active combined recording overlay. */
     public static native void updateCombinedRecordingSpeed(int speedKmh);
 }

@@ -531,18 +531,31 @@ public final class DashcamStorageManager {
                             + " [" + where.what + "] (parent " + describeFile(parent) + ")");
                     continue;
                 }
-                if (!recordsDir.canWrite()) {
-                    trace(trace, "no: not writable " + recordsDir.getAbsolutePath()
-                            + " [" + where.what + "] (existed=" + existed + " "
-                            + describeFile(recordsDir) + ")");
-                    continue;
-                }
+                // canWrite() is access(W_OK): the kernel's opinion about permission bits,
+                // not a write. It used to decide this on its own, and a volume it called
+                // read-only was rejected without anything ever being attempted - which is how a
+                // stick that recorded happily three hours earlier came back as NOT_WRITABLE at
+                // the next start, with nothing in the report to say why.
+                //
+                // So the probe always runs now, and its answer wins. It writes a file, fsyncs
+                // it, reads back its length and deletes it: if that works the volume is
+                // writable, whatever access(2) thinks. And when it does not work, the reason
+                // lands in the report - EROFS for a mount that came up read-only, EACCES for a
+                // permission problem - which are different faults that used to arrive as the
+                // same line.
+                boolean advisoryWritable = recordsDir.canWrite();
                 String probeError = writeProbeError(recordsDir);
                 if (probeError != null) {
                     anyWriteTestFailed = true;
                     trace(trace, "no: write probe failed in " + recordsDir.getAbsolutePath()
-                            + " [" + where.what + "]: " + probeError);
+                            + " [" + where.what + "] (existed=" + existed
+                            + " canWrite=" + advisoryWritable + " "
+                            + describeFile(recordsDir) + "): " + probeError);
                     continue;
+                }
+                if (!advisoryWritable) {
+                    trace(trace, "note: canWrite() said no but the write probe succeeded in "
+                            + recordsDir.getAbsolutePath() + " [" + where.what + "]");
                 }
                 accepted = recordsDir;
                 acceptedWhat = where.what;
@@ -703,7 +716,7 @@ public final class DashcamStorageManager {
     }
 
     /** Returns null when the probe wrote and read back, otherwise why it did not. */
-    private static String writeProbeError(File dir) {
+    public static String writeProbeError(File dir) {
         File probe = new File(dir, WRITE_PROBE_FILE_NAME);
         try {
             try (FileOutputStream out = new FileOutputStream(probe)) {

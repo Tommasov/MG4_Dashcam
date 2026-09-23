@@ -137,6 +137,15 @@ Java_com_drivehub_kamera_CameraProbe_stopCombinedMp4Record(JNIEnv* /*env*/, jcla
 }
 
 extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_drivehub_kamera_CameraProbe_awaitPendingFlushes(JNIEnv* /*env*/, jclass /*clazz*/,
+                                                         jint timeoutMs) {
+    return guarded("awaitPendingFlushes", [&]() -> bool {
+        return camera_stream_manager::awaitPendingFlushes(static_cast<int>(timeoutMs));
+    }) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
 JNIEXPORT void JNICALL
 Java_com_drivehub_kamera_CameraProbe_releaseCombinedCameras(JNIEnv* /*env*/, jclass /*clazz*/) {
     guarded("releaseCombinedCameras", []() -> bool {

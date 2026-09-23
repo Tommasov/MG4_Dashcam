@@ -29,6 +29,9 @@ public final class UiPrefs {
      * asking the server every time it is opened.
      */
     public static final String KEY_DEV_UPDATE_BETA_CHANNEL = "devUpdateBetaChannel";
+    public static final String KEY_DEV_STANDBY_DIAGNOSTICS = "devStandbyDiagnostics";
+    public static final String KEY_STATUS_BAR_ICON = "statusBarIcon";
+    public static final String KEY_STATUS_BAR_ICON_X = "statusBarIconX";
     public static final String KEY_UPDATE_LAST_CHECK_MS = "updateLastCheckMs";
     public static final String KEY_UPDATE_SEEN_VERSION_CODE = "updateSeenVersionCode";
     public static final String KEY_UPDATE_SEEN_VERSION_NAME = "updateSeenVersionName";
@@ -59,6 +62,74 @@ public final class UiPrefs {
 
     public static boolean isUpdateBetaChannel(SharedPreferences prefs) {
         return prefs.getBoolean(KEY_DEV_UPDATE_BETA_CHANNEL, false);
+    }
+
+    /**
+     * Whether to watch a shutdown closely and report it afterwards.
+     *
+     * <p>Off unless somebody asks for it, and that is not a detail. With it on, the app keeps a
+     * beat in the journal through the whole standby and sends a report by itself the next time
+     * it starts. That is the right tool for working out what the head unit does between locking
+     * the car and the processor stopping - and it is also an app that uploads on its own, which
+     * this one promises not to be unless the driver says so.
+     */
+    public static boolean isStandbyDiagnostics(SharedPreferences prefs) {
+        return prefs.getBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, false);
+    }
+
+    /**
+     * Whether to put a dot in the head unit's own status bar.
+     *
+     * <p>Off by default, and left to the driver rather than decided here. The factory bar has no
+     * way of taking an icon from another app, so showing one means drawing over it - which works
+     * and looks right, and is also the most conspicuous thing this app does. Somebody who would
+     * rather the car looked untouched should not have to switch it off.
+     */
+    public static boolean isStatusBarIcon(SharedPreferences prefs) {
+        return prefs.getBoolean(KEY_STATUS_BAR_ICON, false);
+    }
+
+    /**
+     * Where along the top the dot sits, 0 hard left to 100 hard right.
+     *
+     * <p>The middle by default, because of how that bar is laid out. The factory icons fill it
+     * <b>from the right towards the middle</b>, so how far left they reach depends on how many
+     * of them there are at that moment - connect something and the whole row shifts. Anchoring
+     * on the right would put the dot clear of them most of the time and underneath one of them
+     * occasionally, which is the worst kind of fault: the sort that only appears when something
+     * else is plugged in. The centre is the climate control, fixed, with a space of its own.
+     *
+     * <p>What is left is the band between the two, and the way to use it follows from which of
+     * its two edges moves. The centre block - the strip the climate panel is pulled down from -
+     * has a fixed width, so the left edge of the band stays where it is; the icons on the right
+     * do not. So the dot goes as close to the centre as it can while still clearing it: every
+     * pixel further right is a pixel nearer the edge that shifts.
+     *
+     * <p>Seventy per cent to begin with, from a photograph of the bar: the climate strip ends
+     * a little past the middle, and on that top row there is nothing at all between it and the
+     * right-hand edge - the temperature, the seat heaters, Bluetooth and the signal live on the
+     * row below. So the gap is wide, and starting inside it beats starting on top of the strip.
+     *
+     * <p>Still a slider rather than a number fixed here. Dragging the dot into the gap takes five seconds; finding the same
+     * number by rebuilding takes a drive each time.
+     *
+     * <p>Sitting over that strip would cost nothing but looks, incidentally: the window is
+     * untouchable, so a finger reaching for the climate panel goes straight through it.
+     */
+    public static int getStatusBarIconX(SharedPreferences prefs) {
+        return Math.max(0, Math.min(100, prefs.getInt(KEY_STATUS_BAR_ICON_X, 70)));
+    }
+
+    public static void setStatusBarIconX(SharedPreferences prefs, int percent) {
+        prefs.edit().putInt(KEY_STATUS_BAR_ICON_X, Math.max(0, Math.min(100, percent))).apply();
+    }
+
+    public static void setStatusBarIcon(SharedPreferences prefs, boolean on) {
+        prefs.edit().putBoolean(KEY_STATUS_BAR_ICON, on).apply();
+    }
+
+    public static void setStandbyDiagnostics(SharedPreferences prefs, boolean on) {
+        prefs.edit().putBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, on).apply();
     }
 
     public static void setUpdateBetaChannel(SharedPreferences prefs, boolean beta) {

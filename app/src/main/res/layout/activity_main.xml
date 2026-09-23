@@ -392,6 +392,45 @@
                     android:text="@string/label_oem_max_speed_summary" />
 
                 <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swStatusBarIcon"
+                    style="@style/Choice"
+                    android:layout_width="wrap_content"
+                    app:switchPadding="@dimen/switch_padding"
+                    android:background="@null"
+                    android:thumb="@drawable/switch_thumb_selector"
+                    app:track="@drawable/switch_track_selector"
+                    android:text="@string/label_status_bar_icon" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:text="@string/label_status_bar_icon_summary" />
+
+                <TextView
+                    android:id="@+id/tvStatusBarIconX"
+                    style="@style/Hint"
+                    android:text="@string/label_status_bar_icon_position" />
+
+                <SeekBar
+                    android:id="@+id/sbStatusBarIconX"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="100" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swStandbyDiagnostics"
+                    style="@style/Choice"
+                    android:layout_width="wrap_content"
+                    app:switchPadding="@dimen/switch_padding"
+                    android:background="@null"
+                    android:thumb="@drawable/switch_thumb_selector"
+                    app:track="@drawable/switch_track_selector"
+                    android:text="@string/label_standby_diagnostics" />
+
+                <TextView
+                    style="@style/Hint"
+                    android:text="@string/label_standby_diagnostics_summary" />
+
+                <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/swBetaChannel"
                     style="@style/Choice"
                     android:layout_width="wrap_content"

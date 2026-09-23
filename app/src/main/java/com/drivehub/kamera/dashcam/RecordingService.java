@@ -4,6 +4,11 @@ import com.drivehub.kamera.R;
 
 import com.drivehub.kamera.CameraProbe;
 import com.drivehub.kamera.dev.DevRuntimeLog;
+import com.drivehub.kamera.dev.ProbeReport;
+import android.os.Build;
+import androidx.annotation.NonNull;
+import com.drivehub.kamera.BuildConfig;
+import com.drivehub.kamera.dev.StandbyJournal;
 import com.drivehub.kamera.helper.app.NotificationChannelHelper;
 import com.drivehub.kamera.helper.vehiclesensors.VehicleGearProbe;
 import com.drivehub.kamera.helper.vehiclesensors.VehicleSpeedReader;
@@ -147,7 +152,7 @@ public class RecordingService extends Service {
     private final Object eventLock = new Object();
     private final Object stateLock = new Object();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final ExecutorService eventCopyExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService eventCopyExecutor = Executors.newSingleThreadExecutor();
 
     /**
      * Everything that used to happen between two clips, moved off the gap.
@@ -161,7 +166,34 @@ public class RecordingService extends Service {
      * <p>None of it has to be there. Retention and bookkeeping happen once the next clip is
      * already recording, and the volume is re-probed while the current one still is.
      */
-    private final ExecutorService housekeepingExecutor = Executors.newSingleThreadExecutor();
+    private ExecutorService housekeepingExecutor = Executors.newSingleThreadExecutor();
+
+    /**
+     * The housekeeping thread, alive.
+     *
+     * <p>Standby shuts both executors down so nothing is left writing to the stick when the
+     * power goes, and the service deliberately survives that - it is not stopped, so that the
+     * supervisor can start recording again when the screen comes back. Which left a trap: an
+     * executor, once shut down, stays shut down forever, and the submission that ends a segment
+     * is not guarded. The first clip after a standby would have thrown, taken the recording loop
+     * with it, and stopped the retention that keeps the stick from filling up.
+     *
+     * <p>Whether the process actually survives a suspend on this head unit is not settled. The
+     * trap is removed either way: asking for the executor is how you get one.
+     */
+    private synchronized ExecutorService housekeeping() {
+        if (housekeepingExecutor.isShutdown()) {
+            housekeepingExecutor = Executors.newSingleThreadExecutor();
+        }
+        return housekeepingExecutor;
+    }
+
+    private synchronized ExecutorService eventCopy() {
+        if (eventCopyExecutor.isShutdown()) {
+            eventCopyExecutor = Executors.newSingleThreadExecutor();
+        }
+        return eventCopyExecutor;
+    }
 
     /**
      * The hole between two clips, and the three things that make it up.
@@ -300,6 +332,51 @@ public class RecordingService extends Service {
         context.startForegroundService(i);
     }
 
+    /** Marks the start of a session in the journal, so the previous one has a visible end. */
+    private void journalServiceStart() {
+        StandbyJournal.add(this, "recording session starting");
+        sendStandbyReportIfAsked();
+    }
+
+    /**
+     * Sends what the journal saw, once per session, when somebody has asked to watch a shutdown.
+     *
+     * <p>Sent on the way up rather than on the way down, and that is the point. At standby the
+     * modem is going away with everything else, so an upload started there is a race against
+     * the power - and a report that arrives half written says nothing. The journal is already
+     * on internal storage and already synced, so it survives the gap on its own; the next start
+     * has a working network, a running system and all the time it needs to post it.
+     *
+     * <p>What it carries is deliberately small: the journal, which is the answer to the
+     * question, and the runtime log for context. The full report stays behind its button.
+     */
+    private void sendStandbyReportIfAsked() {
+        if (!UiPrefs.isStandbyDiagnostics(prefs()) || !ProbeReport.isConfigured()) {
+            return;
+        }
+        String body = "# automatic report: what the last shutdown looked like" + "\n"
+                + "version: " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")" + "\n"
+                + "fingerprint: " + Build.FINGERPRINT + "\n"
+                + "service starts: " + prefs().getInt(KEY_SERVICE_STARTS, 0) + "\n\n"
+                + "== what happened at the last standby ==" + "\n"
+                + StandbyJournal.snapshot(this) + "\n"
+                + "== runtime log ==" + "\n"
+                + DevRuntimeLog.snapshot() + "\n";
+        ProbeReport.send(this, "standby", body, new ProbeReport.Callback() {
+            @Override
+            public void onSent(@NonNull String reportName) {
+                StandbyJournal.add(RecordingService.this, "standby report sent as " + reportName);
+            }
+
+            @Override
+            public void onFailed(@NonNull String reason) {
+                // Worth a line and nothing more: no network at the moment of an ignition is the
+                // normal case, and the journal is still there to be read by hand.
+                StandbyJournal.add(RecordingService.this, "standby report not sent: " + reason);
+            }
+        });
+    }
+
     public static void requestUsbEject(Context context) {
         Intent i = new Intent(context, RecordingService.class);
         i.setAction(ACTION_EJECT_USB);
@@ -405,44 +482,169 @@ public class RecordingService extends Service {
                     onScreenOff();
                 } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
                     onScreenOn();
+                } else if (Intent.ACTION_SHUTDOWN.equals(action)) {
+                    onSystemShutdown(goAsync());
+                } else if (action != null) {
+                    // Not acted on, only written down: these are the landmarks that say what
+                    // the head unit does between the display going dark and the processor
+                    // stopping.
+                    DevRuntimeLog.add("RecordingService", "system says " + action);
+                    StandbyJournal.add(RecordingService.this, "system says " + action);
                 }
             }
         };
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         filter.addAction(Intent.ACTION_SCREEN_ON);
+        // Everything else the system might say on the way down. Locking the car is not one
+        // event but a sequence, and which of these actually arrive on this head unit - and in
+        // what order - is the thing being measured. A filter costs nothing; a phase we never
+        // saw because nobody listened costs a week.
+        filter.addAction(Intent.ACTION_SHUTDOWN);
+        filter.addAction(Intent.ACTION_USER_PRESENT);
+        filter.addAction(Intent.ACTION_POWER_CONNECTED);
+        filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
         // Screen state is not deliverable from the manifest: it has to be a live receiver.
         registerReceiver(screenReceiver, filter);
     }
 
     private void onScreenOff() {
+        // Every one of these used to be able to leave without saying anything, and a journal
+        // with no screen-off line in it could mean the broadcast never came or that it came and
+        // we decided against acting - two completely different faults reading the same.
         if (worker == null || stopRequested || usbEjectInProgress) {
+            StandbyJournal.add(this, "screen off, but nothing to close"
+                    + " (worker=" + (worker != null) + " stopping=" + stopRequested
+                    + " ejecting=" + usbEjectInProgress + ")");
             return;
         }
         int speedKmh = VehicleSpeedReader.readSpeedKmh();
         if (speedKmh > SCREEN_OFF_MAX_SPEED_KMH) {
             DevRuntimeLog.add("RecordingService",
                     "screen off at " + speedKmh + " km/h; still driving, keeping the loop");
+            StandbyJournal.add(this, "screen off at " + speedKmh + " km/h; still driving");
             return;
         }
         DevRuntimeLog.add("RecordingService",
                 "screen off at " + speedKmh + " km/h; closing the clip before standby");
+        StandbyJournal.add(this, "screen off at " + speedKmh + " km/h; closing the clip");
         pausedForScreenOff = true;
         shutdownRecordingServiceWithoutStopSelf();
         // Off the main thread: quiescence waits for the muxer, and this runs inside a broadcast.
         new Thread(() -> {
+            long startedMs = SystemClock.elapsedRealtime();
             boolean quiet = awaitShutdownQuiescence();
-            DevRuntimeLog.add("RecordingService",
-                    quiet ? "clip closed before standby" : "standby came before the clip closed");
+            String verdict = String.format(Locale.US, "%s after %.1fs (%s)",
+                    quiet ? "medium idle before standby" : "STANDBY CAME FIRST",
+                    (SystemClock.elapsedRealtime() - startedMs) / 1000.0,
+                    lastQuiescenceDetail);
+            DevRuntimeLog.add("RecordingService", verdict);
+            StandbyJournal.add(this, verdict);
+            startStandbyHeartbeat();
         }, "RecordingServiceStandby").start();
     }
 
+    /**
+     * Writes one line a second for as long as we are still being run.
+     *
+     * <p>Nothing announces the moment the processor stops: the app is simply not scheduled
+     * again, and there is no event to catch and no line to write. So the measurement has to be
+     * the absence of one - the last beat before the gap is the last moment we existed, and the
+     * next session's first line says how long the gap was.
+     *
+     * <p>Only when asked for, because a beat a second for a minute of standby is pointless wear
+     * on every car that is not being investigated. It stops on its own after
+     * {@link #STANDBY_HEARTBEAT_MAX}, and the moment the screen comes back.
+     */
+    private void startStandbyHeartbeat() {
+        if (!UiPrefs.isStandbyDiagnostics(prefs()) || standbyHeartbeat != null) {
+            return;
+        }
+        final Thread beat = new Thread(() -> {
+            long started = SystemClock.elapsedRealtime();
+            int n = 0;
+            while (!Thread.currentThread().isInterrupted()
+                    && SystemClock.elapsedRealtime() - started < STANDBY_HEARTBEAT_MAX) {
+                StandbyJournal.add(this, String.format(Locale.US, "still running, +%ds", ++n));
+                try {
+                    Thread.sleep(1000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            StandbyJournal.add(this, "heartbeat ended on its own after " + n + "s");
+        }, "RecordingServiceHeartbeat");
+        standbyHeartbeat = beat;
+        beat.start();
+    }
+
+    private void stopStandbyHeartbeat() {
+        Thread beat = standbyHeartbeat;
+        standbyHeartbeat = null;
+        if (beat != null) {
+            beat.interrupt();
+        }
+    }
+
+    /** Long enough to outlast the suspend, short enough not to run all night if it never comes. */
+    private static final long STANDBY_HEARTBEAT_MAX = 5 * 60 * 1000L;
+
+    private volatile Thread standbyHeartbeat;
+
+    /**
+     * The broadcast that turned out to be the one that matters on this car.
+     *
+     * <p>The clean close was built on ACTION_SCREEN_OFF, on the reasoning that locking the car
+     * dims the display a minute before the processor stops. The journal from 23 September says
+     * that is not what happens here: between one session and the next there is no screen-off
+     * line at all, only
+     * {@code system says android.intent.action.ACTION_SHUTDOWN} - and then nothing. So the head
+     * unit does announce itself, through the one broadcast Android has always had for this, and
+     * we were listening for the wrong one. Every ignition since the feature was written has
+     * been cutting power with a clip open.
+     *
+     * <p>Handled with {@code goAsync()}: the work cannot run on the main thread here, and
+     * letting {@code onReceive} return would let the system carry on shutting down while the
+     * stick is still being written. Holding the broadcast open makes it wait, which is the
+     * entire point - but only briefly. Android gives a shutdown receiver about ten seconds
+     * before it stops caring, so the wait is given eight and then gives up rather than being
+     * killed in the middle.
+     */
+    private void onSystemShutdown(@Nullable BroadcastReceiver.PendingResult pending) {
+        DevRuntimeLog.add("RecordingService", "system says ACTION_SHUTDOWN");
+        StandbyJournal.add(this, "ACTION_SHUTDOWN: closing the clip");
+        stopStandbyHeartbeat();
+        final boolean hadWork = worker != null;
+        shutdownRecordingServiceWithoutStopSelf();
+        new Thread(() -> {
+            long startedMs = SystemClock.elapsedRealtime();
+            boolean quiet = hadWork ? awaitShutdownQuiescence(SHUTDOWN_BUDGET_MS) : true;
+            StandbyJournal.add(this, String.format(Locale.US, "%s after %.1fs (%s)",
+                    quiet ? "medium idle before shutdown" : "SHUTDOWN CAME FIRST",
+                    (SystemClock.elapsedRealtime() - startedMs) / 1000.0,
+                    hadWork ? lastQuiescenceDetail : "nothing was recording"));
+            if (pending != null) {
+                try {
+                    pending.finish();
+                } catch (Throwable ignored) {
+                    // The system stopped waiting; nothing useful follows.
+                }
+            }
+        }, "RecordingServiceShutdown").start();
+    }
+
+    /** All the time a shutdown receiver can safely take, less a margin. */
+    private static final long SHUTDOWN_BUDGET_MS = 8000L;
+
     private void onScreenOn() {
+        stopStandbyHeartbeat();
         if (!pausedForScreenOff) {
             return;
         }
         pausedForScreenOff = false;
         DevRuntimeLog.add("RecordingService", "screen on; the supervisor will restart the loop");
+        StandbyJournal.add(this, "screen on");
         // No restart here. The supervisor already starts a loop whenever the switch is on and
         // no worker is running, and it is the path that has been exercised; a second way in
         // would be a second thing to keep correct.
@@ -619,6 +821,9 @@ public class RecordingService extends Service {
 
         stopRequested = false;
         if (ACTION_START.equals(action)) {
+            // A line per session, so the journal shows where one ends and the next begins -
+            // which is also the only way to tell whether the process survived the suspend.
+            journalServiceStart();
             // Asked for by hand, from the switch or from the boot receiver. Whatever went wrong
             // before, this is a fresh attempt and deserves its full allowance of restarts.
             prefs().edit()
@@ -785,7 +990,7 @@ public class RecordingService extends Service {
             final long doneEnd = System.currentTimeMillis();
             final int doneKeep = keepSegments;
             lastSegmentCompletedMs = doneEnd;
-            housekeepingExecutor.execute(
+            housekeeping().execute(
                     () -> onSegmentCompleted(doneDir, doneName, doneStart, doneEnd, doneKeep));
 
             // Check whether recording has been disabled in prefs.
@@ -877,7 +1082,7 @@ public class RecordingService extends Service {
         }
         prefetchInFlight = true;
         prefetchedBaseDir = null;
-        housekeepingExecutor.execute(() -> {
+        housekeeping().execute(() -> {
             try {
                 DashcamStorageManager.Resolution res = DashcamStorageManager.resolve(this);
                 if (res.baseDir != null && ensureDirectoryExists(res.baseDir, "records base dir")
@@ -1399,7 +1604,7 @@ public class RecordingService extends Service {
 
     private void enqueueEventCopyJobs(List<EventCopyJob> jobs) {
         for (EventCopyJob job : jobs) {
-            eventCopyExecutor.execute(() -> copyEventSegments(job));
+            eventCopy().execute(() -> copyEventSegments(job));
         }
     }
 
@@ -1653,6 +1858,10 @@ public class RecordingService extends Service {
     /** Backoff for the wait below: about half a minute in all, most of it in the first seconds. */
     private static final long[] STORAGE_WAIT_MS = {0L, 1_000L, 2_000L, 4_000L, 8_000L, 15_000L};
 
+    /** Why the last resolution failed, so the wait above can say it out loud. */
+    private DashcamStorageManager.UsbState lastResolveUsbState =
+            DashcamStorageManager.UsbState.OK;
+
     /**
      * The records directory, waiting for it rather than giving up the first time it is not there.
      *
@@ -1666,6 +1875,7 @@ public class RecordingService extends Service {
      * answer, it is a "not yet".
      */
     private File awaitRecordsBaseDir() {
+        final long waitStartMs = SystemClock.elapsedRealtime();
         for (int attempt = 0; attempt < STORAGE_WAIT_MS.length; attempt++) {
             if (stopRequested || !prefs().getBoolean(DashcamSettings.KEY_ENABLED, false)) {
                 return null;
@@ -1688,11 +1898,21 @@ public class RecordingService extends Service {
             File dir = resolveActiveBaseDir(true, lastTry);
             if (dir != null) {
                 if (attempt > 0) {
-                    DevRuntimeLog.add("RecordingService",
-                            "storage ready on attempt " + (attempt + 1));
+                    DevRuntimeLog.add("RecordingService", String.format(Locale.US,
+                            "storage ready on attempt %d/%d after %.1fs",
+                            attempt + 1, STORAGE_WAIT_MS.length,
+                            (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0));
                 }
                 return dir;
             }
+            // Every attempt says something now. This wait used to be silent unless it
+            // succeeded late or gave up entirely, so a start that failed on a volume which was
+            // there but not yet writable left nothing at all in the report to read afterwards.
+            DevRuntimeLog.add("RecordingService", String.format(Locale.US,
+                    "storage not ready: attempt %d/%d at +%.1fs, %s",
+                    attempt + 1, STORAGE_WAIT_MS.length,
+                    (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0,
+                    lastResolveUsbState));
         }
         return null;
     }
@@ -1703,12 +1923,14 @@ public class RecordingService extends Service {
 
     private File resolveActiveBaseDir(boolean initial, boolean announceFailure) {
         DashcamStorageManager.Resolution res = DashcamStorageManager.resolve(this);
+        lastResolveUsbState = res.usbState;
         if (res.baseDir == null) {
             if (!announceFailure) {
                 // A retry is still in hand; saying "error" now would only make the badge flicker
                 // red and back while the volume finishes mounting.
                 return null;
             }
+            lastResolveUsbState = res.usbState;
             DevRuntimeLog.add("RecordingService", "Storage resolve failed: " + res.usbState);
             boolean readOnly = res.usbState == DashcamStorageManager.UsbState.NOT_WRITABLE
                     || res.usbState == DashcamStorageManager.UsbState.WRITE_TEST_FAILED;
@@ -1716,7 +1938,18 @@ public class RecordingService extends Service {
                     readOnly ? ERROR_USB_READ_ONLY : ERROR_USB_STORAGE);
             return null;
         }
-        if (!ensureDirectoryExists(res.baseDir, "records base dir") || !res.baseDir.canWrite()) {
+        // The second gate, and the one that would have quietly undone the first: the probe
+        // upstream can prove a volume writable and this would still turn it away on the same
+        // access(2) answer that was wrong in the first place. It asks the same question the
+        // probe asks, and it says out loud why it refused.
+        String baseProbeError = null;
+        if (ensureDirectoryExists(res.baseDir, "records base dir")) {
+            baseProbeError = DashcamStorageManager.writeProbeError(res.baseDir);
+        }
+        if (baseProbeError != null || !res.baseDir.isDirectory()) {
+            DevRuntimeLog.add("RecordingService", "records base dir unusable: "
+                    + res.baseDir.getAbsolutePath() + " (canWrite=" + res.baseDir.canWrite()
+                    + (baseProbeError == null ? "" : ", probe: " + baseProbeError) + ")");
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_STORAGE_NOT_WRITABLE);
             return null;
         }
@@ -1819,30 +2052,108 @@ public class RecordingService extends Service {
         }
     }
 
+    /**
+     * Waits until nothing of ours is still touching the medium.
+     *
+     * <p>It used to wait for the worker and for one of the two executors, and for neither of the
+     * flush threads. So it could report the clip closed while the housekeeping thread was
+     * deleting expired clips off the stick and a detached thread was still fsyncing 34 MB onto
+     * it - and deleting files is precisely what rewrites the FAT chains and the free-cluster
+     * count that came back broken.
+     *
+     * <p>Three things now, each named in the journal, because a shutdown that was not quiet is
+     * worth knowing about in detail rather than as one word.
+     */
     private boolean awaitShutdownQuiescence() {
+        return awaitShutdownQuiescence(17000L);
+    }
+
+    /**
+     * @param budgetMs everything this is allowed to take. Standby can afford to be patient;
+     *                 a shutdown receiver cannot, and being killed half way through waiting is
+     *                 worse than giving up on purpose and saying so.
+     */
+    private boolean awaitShutdownQuiescence(long budgetMs) {
+        final long deadline = SystemClock.elapsedRealtime() + budgetMs;
         Thread workerThread = worker;
+        boolean workerDone = true;
         if (workerThread != null) {
             try {
-                workerThread.join(2000);
+                workerThread.join(Math.max(1, Math.min(2000, remaining(deadline))));
+                workerDone = !workerThread.isAlive();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return false;
             }
         }
-        eventCopyExecutor.shutdown();
-        housekeepingExecutor.shutdown();
+        ExecutorService events = eventCopyExecutor;
+        ExecutorService chores = housekeepingExecutor;
+        events.shutdown();
+        chores.shutdown();
+        boolean eventsDone;
+        boolean choresDone;
         try {
-            return eventCopyExecutor.awaitTermination(5000, TimeUnit.MILLISECONDS);
+            eventsDone = events.awaitTermination(remaining(deadline), TimeUnit.MILLISECONDS);
+            choresDone = chores.awaitTermination(remaining(deadline), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
         }
+        boolean flushed;
+        try {
+            flushed = CameraProbe.awaitPendingFlushes((int) remaining(deadline));
+        } catch (Throwable t) {
+            // An older native library without this entry point must not turn a shutdown into a
+            // crash; it only means we cannot tell whether the writes landed.
+            Log.w(TAG, "awaitPendingFlushes unavailable", t);
+            flushed = false;
+        }
+        lastQuiescenceDetail = String.format(Locale.US,
+                "worker=%s retention=%s events=%s writes=%s",
+                workerDone, choresDone, eventsDone, flushed);
+        return workerDone && eventsDone && choresDone && flushed;
     }
+
+    /**
+     * Redraws the dot now, for a switch that was just flipped.
+     *
+     * <p>Status is published on its own rhythm - a clip boundary, a hand-off - so without this
+     * the dot would appear up to half a minute after being asked for, which reads as a switch
+     * that does nothing. Silent when the service is not running: there is no recording to show.
+     */
+    public static void refreshStatusIcon(@NonNull Context context) {
+        RecordingService svc = sInstance;
+        if (svc == null) {
+            return;
+        }
+        SharedPreferences p = svc.prefs();
+        svc.statusIcon().update(UiPrefs.isStatusBarIcon(p)
+                ? p.getString(KEY_STATUS, STATUS_OFF) : null);
+    }
+
+    /** The dot over the factory status bar, built the first time somebody asks for it. */
+    private StatusIconOverlay statusIcon;
+
+    private synchronized StatusIconOverlay statusIcon() {
+        if (statusIcon == null) {
+            statusIcon = new StatusIconOverlay(this);
+        }
+        return statusIcon;
+    }
+
+    /** Time left before the deadline, never zero: a zero wait is a wait that never happens. */
+    private static long remaining(long deadlineMs) {
+        return Math.max(1L, deadlineMs - SystemClock.elapsedRealtime());
+    }
+
+    /** What the last shutdown managed to finish, for the journal. */
+    private volatile String lastQuiescenceDetail = "";
 
     private void stopServiceIfNotEjecting() {
         if (usbEjectInProgress) {
             return;
         }
+        statusIcon().hide();
         stopForeground(true);
         stopSelf();
     }
@@ -1940,6 +2251,8 @@ public class RecordingService extends Service {
                 .putInt(KEY_TOTAL_CAMERAS, Math.max(0, totalCameras))
                 .putString(KEY_LAST_ERROR, lastError)
                 .apply();
+
+        statusIcon().update(UiPrefs.isStatusBarIcon(prefs()) ? status : null);
 
         String notificationText;
         if (STATUS_RECORDING.equals(status)) {
@@ -2208,6 +2521,7 @@ public class RecordingService extends Service {
 
     @Override
     public void onDestroy() {
+        statusIcon().hide();
         sServiceRunning = false;
         sInstance = null;
         sWorkerActive = false;
