@@ -95,6 +95,7 @@ public class RecordingService extends Service {
      * with its light on sends them looking in the wrong place.
      */
     private static final String ERROR_USB_READ_ONLY = "usb volume read only";
+    private static final String ERROR_USB_FULL = "usb volume full";
     private static final String ERROR_LOOP_DIED = "recording loop died";
     private static final String ERROR_STALLED = "recording stalled";
     private static final String ERROR_CRASH_LOOP = "crash loop";
@@ -2014,6 +2015,10 @@ public class RecordingService extends Service {
             }
             lastResolveUsbState = res.usbState;
             DevRuntimeLog.add("RecordingService", "Storage resolve failed: " + res.usbState);
+            if (res.usbState == DashcamStorageManager.UsbState.NOT_ENOUGH_SPACE) {
+                publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_USB_FULL);
+                return null;
+            }
             boolean readOnly = res.usbState == DashcamStorageManager.UsbState.NOT_WRITABLE
                     || res.usbState == DashcamStorageManager.UsbState.WRITE_TEST_FAILED;
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS,
@@ -2330,6 +2335,9 @@ public class RecordingService extends Service {
                 break;
             case ERROR_USB_READ_ONLY:
                 res = R.string.dashcam_error_usb_read_only;
+                break;
+            case ERROR_USB_FULL:
+                res = R.string.dashcam_error_usb_full;
                 break;
             case ERROR_LOOP_DIED:
                 res = R.string.dashcam_error_loop_died;

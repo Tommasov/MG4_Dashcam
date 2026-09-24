@@ -14,6 +14,8 @@ import android.util.Log;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -62,6 +64,23 @@ public final class DashcamStorageManager {
     /** Tells Android's media scanner to leave this folder, and everything under it, alone. */
     private static final String NOMEDIA_FILE_NAME = ".nomedia";
 
+    /**
+     * How many clips of room a volume has to have before it is called usable.
+     *
+     * <p>The write probe creates a file of seven bytes, and for a long time that was the whole
+     * test. A medium with half a megabyte left passes it - and then the first real clip fails,
+     * so the app declares a working volume and stops recording a moment later for a reason
+     * nobody can see. Being able to write seven bytes does not prove being able to write
+     * thirty-four megabytes.
+     *
+     * <p>Two clips: the one about to be written, and somewhere for the next one to go while
+     * the last is still being flushed.
+     */
+    private static final int REQUIRED_CLIPS_OF_ROOM = 2;
+
+    /** At most this many old clips are removed in one attempt to make room. */
+    private static final int MAX_RECLAIM_DELETIONS = 40;
+
     /** The folder the marker was last put in, so it is offered once per medium and not forced. */
     private static final String KEY_NOMEDIA_PLACED_IN = "noMediaPlacedIn";
     private static final File LEGACY_STORAGE_ROOT = new File("/storage");
@@ -74,6 +93,7 @@ public final class DashcamStorageManager {
         NO_MEDIUM,          // no removable volume mounted under /storage
         NOT_WRITABLE,       // volume(s) found but the dashcam dir cannot be created/written
         WRITE_TEST_FAILED,  // dir exists but the actual write probe failed
+        NOT_ENOUGH_SPACE,   // writable, but not enough room for a clip and a margin
         MULTIPLE_MEDIA,     // more than one usable medium and no choice made — see setPreferredVolumeId
         CHOSEN_VOLUME_ABSENT // a volume was chosen by hand and it is not connected
     }
@@ -290,6 +310,52 @@ public final class DashcamStorageManager {
             }
         }
         return deleted;
+    }
+
+    /** Room for {@link #REQUIRED_CLIPS_OF_ROOM} clips at the configured bitrate and length. */
+    private static long bytesNeeded(Context context) {
+        SharedPreferences prefs = UiPrefs.getPrefs(context);
+        long bitrate = Math.max(1000000L, DashcamSettings.getRecordingBitrateBps(prefs));
+        long seconds = Math.max(1, DashcamSettings.getSegmentDurationSec());
+        return bitrate / 8L * seconds * REQUIRED_CLIPS_OF_ROOM;
+    }
+
+    /**
+     * Deletes the oldest clips until there is room, and says so.
+     *
+     * <p>This is what retention would have done if it had ever been reached. It is deliberately
+     * timid: oldest first, never the newest file - which is either the clip being written or
+     * the most recent thing worth keeping - and it stops the moment there is enough room rather
+     * than tidying for its own sake. If something other than our clips is filling the medium it
+     * runs out of things to delete and says so, instead of emptying the folder.
+     *
+     * @return the free space after trying, so the caller can decide with a number.
+     */
+    private static long reclaimSpace(File dir, long needed, List<String> trace) {
+        File[] all = dir.listFiles((d, name) -> name.toLowerCase(Locale.US).endsWith(CLIP_SUFFIX));
+        if (all == null || all.length <= 1) {
+            return dir.getUsableSpace();
+        }
+        List<File> clips = new ArrayList<>(Arrays.asList(all));
+        Collections.sort(clips, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        clips.remove(clips.size() - 1);
+
+        int deleted = 0;
+        long free = dir.getUsableSpace();
+        for (File clip : clips) {
+            if (free >= needed || deleted >= MAX_RECLAIM_DELETIONS) {
+                break;
+            }
+            if (clip.delete()) {
+                deleted++;
+            }
+            free = dir.getUsableSpace();
+        }
+        if (deleted > 0) {
+            trace(trace, "made room in " + dir.getAbsolutePath() + ": removed " + deleted
+                    + " old clip(s), now " + (free / 1048576) + " MB free");
+        }
+        return free;
     }
 
     private static long sizeOfDirectory(File dir) {
@@ -563,6 +629,7 @@ public final class DashcamStorageManager {
         List<UsbCandidate> prioritized = prioritizeUsbCandidates(candidates);
         List<File> usable = new ArrayList<>();
         boolean anyWriteTestFailed = false;
+        boolean anyOutOfSpace = false;
         for (UsbCandidate candidate : prioritized) {
             File accepted = null;
             String acceptedWhat = "";
@@ -603,6 +670,24 @@ public final class DashcamStorageManager {
                     trace(trace, "note: canWrite() said no but the write probe succeeded in "
                             + recordsDir.getAbsolutePath() + " [" + where.what + "]");
                 }
+
+                long needed = bytesNeeded(context);
+                long free = recordsDir.getUsableSpace();
+                if (free < needed) {
+                    // Full is not a reason to give up before trying the one thing that helps.
+                    // The loop is otherwise closed: no room means no clip, no clip means no
+                    // segment completes, and retention only ever runs when one does - so the
+                    // app waits forever for space that it is the only thing able to release.
+                    long after = reclaimSpace(recordsDir, needed, trace);
+                    if (after < needed) {
+                        anyOutOfSpace = true;
+                        trace(trace, "no: not enough room in " + recordsDir.getAbsolutePath()
+                                + " [" + where.what + "]: " + (after / 1048576)
+                                + " MB free, " + (needed / 1048576) + " MB needed for "
+                                + REQUIRED_CLIPS_OF_ROOM + " clips");
+                        continue;
+                    }
+                }
                 accepted = recordsDir;
                 acceptedWhat = where.what;
                 break;
@@ -622,6 +707,9 @@ public final class DashcamStorageManager {
         if (usable.size() > 1) {
             trace(trace, "multiple usable media (" + usable.size() + "); refusing to pick one");
             return new UsbProbe(UsbState.MULTIPLE_MEDIA, null);
+        }
+        if (anyOutOfSpace) {
+            return new UsbProbe(UsbState.NOT_ENOUGH_SPACE, null);
         }
         return new UsbProbe(
                 anyWriteTestFailed ? UsbState.WRITE_TEST_FAILED : UsbState.NOT_WRITABLE, null);
