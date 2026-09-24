@@ -527,8 +527,9 @@
             android:layout_marginTop="@dimen/row_gap"
             android:layout_marginBottom="@dimen/screen_padding"
             android:fontFamily="monospace"
-            android:textColor="@color/text_secondary"
-            android:textSize="@dimen/mono_size" />
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/mono_size"
+            android:textIsSelectable="true" />
         <!-- The version line doubles as the update mark: tvUpdateBadge sits beside it and is
              gone unless a check has found something newer. A dot in the corner is as loud as
              this needs to be - nothing here should compete with the recording badge. -->

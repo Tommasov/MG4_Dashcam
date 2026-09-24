@@ -19,7 +19,10 @@
     <dimen name="button_size">26sp</dimen>
     <!-- Probe output: dense reference material, not glanceable. A tier below the rest, as the
          launcher does with its own diagnostics screen. -->
-    <dimen name="mono_size">16sp</dimen>
+    <!-- The diagnostics text. It used to be 16sp at half opacity, which is legible at a
+         desk and not in a car: this is read at arm's length, in daylight, often by
+         somebody who has pressed a button precisely because something is wrong. -->
+    <dimen name="mono_size">20sp</dimen>
 
     <!-- The whole row is the touch target, not just the control: a thumb-sized switch is a
          poor thing to aim at from the driver's seat. -->

@@ -369,6 +369,12 @@ public class MainActivity extends AppCompatActivity {
                             details.setText(R.string.update_checksum_failed);
                             return;
                         }
+                        // Said before the handover, not after: committing the install
+                        // replaces the package, which kills this process mid-sentence. A
+                        // screen that goes black with no warning reads as a crash, and the
+                        // app has just been told to do something - so it owes an explanation
+                        // in advance rather than an apology afterwards.
+                        details.setText(R.string.update_installing_will_restart);
                         DashcamUpdates.installVerified(MainActivity.this, apk);
                     });
                 });

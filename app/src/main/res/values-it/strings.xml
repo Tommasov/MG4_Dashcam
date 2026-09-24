@@ -178,4 +178,5 @@
     <string name="dashcam_error_loop_died">registrazione interrotta da un errore interno</string>
     <string name="dashcam_error_stalled">registrazione bloccata</string>
     <string name="dashcam_error_crash_loop">troppi riavvii, registrazione disattivata</string>
+    <string name="update_installing_will_restart">Installazione in corso. L\'app si chiude e torna da sola.</string>
 </resources>

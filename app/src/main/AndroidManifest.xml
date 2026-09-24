@@ -76,6 +76,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
+            <!-- Sent to this app alone once it has been replaced by a newer build of itself.
+                 It is how the app gets back on screen, and how recording resumes, after an
+                 update has killed the process that was doing both. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
         </receiver>
 
         <!-- Yields the camera devices while the factory 360/reverse view is on screen. -->
