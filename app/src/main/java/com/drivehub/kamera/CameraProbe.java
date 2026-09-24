@@ -77,7 +77,7 @@ public final class CameraProbe {
      *                        the factory 360 view asking for the cameras - passes false, and the
      *                        devices are released before this call returns.
      */
-    public static native boolean stopCombinedMp4Record(boolean keepCamerasWarm);
+    public static native boolean stopCombinedMp4Record(boolean keepCamerasWarm, boolean urgent);
 
     /**
      * Releases cameras left open by {@link #stopCombinedMp4Record(boolean)} with the hold set.

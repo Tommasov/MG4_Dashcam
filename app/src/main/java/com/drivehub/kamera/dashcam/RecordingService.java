@@ -241,7 +241,14 @@ public class RecordingService extends Service {
      * <p>Five binder calls a second, on a thread of their own, for a car that is plugged into an
      * engine. The hand-off is worth more than the cycles.
      */
-    private static final long OEM_POLL_MS = 200L;
+    /**
+     * How often the foreground is checked.
+     *
+     * <p>It was 200 ms, and that alone could eat the whole budget: the factory 360 view gives
+     * up after about 210, so a hand-off noticed a fifth of a second late had already lost.
+     * Sixty leaves the time for the release rather than spending it on finding out.
+     */
+    private static final long OEM_POLL_MS = 60L;
     private static final String OEM_AVM_PACKAGE = "com.saicmotor.hmi.aroundview";
     /** When the factory app first appeared, so a failed attempt can be told from a real one. */
     private long oemForegroundSinceMs = 0L;
@@ -413,6 +420,7 @@ public class RecordingService extends Service {
             return;
         }
         DevRuntimeLog.add("RecordingService", "oem pause: releasing cameras now");
+        oemAskedAtMs = SystemClock.elapsedRealtime();
         pausedSinceMs = System.currentTimeMillis();
         oemPauseRequested = true;
         segmentStopRequested = true;
@@ -928,7 +936,7 @@ public class RecordingService extends Service {
             sWorkerActive = false;
             publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_LOOP_DIED);
             try {
-                CameraProbe.stopCombinedMp4Record(false);
+                CameraProbe.stopCombinedMp4Record(false, false);
                 CameraProbe.releaseCombinedCameras();
             } catch (Throwable ignored) {
                 // the encoder may already be gone; nothing useful to do here
@@ -1219,8 +1227,20 @@ public class RecordingService extends Service {
         // pass false and the cameras are released before this call returns, because a device we
         // still hold is one the factory app cannot open.
         final boolean rotating = !stopRequested && !segmentStopRequested && !oemPauseRequested;
+        // The factory 360 view is standing there waiting for the devices, and it has been
+        // measured giving up after about 210 ms. Everything else can afford to close the clip
+        // properly first; this cannot.
+        final boolean urgent = oemPauseRequested;
         final long stopCallMs = SystemClock.elapsedRealtime();
-        boolean stopped = CameraProbe.stopCombinedMp4Record(rotating);
+        boolean stopped = CameraProbe.stopCombinedMp4Record(rotating, urgent);
+        if (urgent && oemAskedAtMs > 0) {
+            // The only number that matters on this path. Under about 210 and the factory view
+            // opens on the first press; over it and the driver presses twice and blames us.
+            DevRuntimeLog.add("RecordingService", String.format(Locale.US,
+                    "cameras free %dms after the 360 asked (its limit is about 210)",
+                    SystemClock.elapsedRealtime() - oemAskedAtMs));
+            oemAskedAtMs = 0L;
+        }
         clipStoppedAtMs = SystemClock.elapsedRealtime();
         lastStopMs = clipStoppedAtMs - stopCallMs;
         if (!stopped) {
@@ -2105,7 +2125,7 @@ public class RecordingService extends Service {
             for (int s = 0; s < 4; s++) {
                 CameraProbe.stopMp4Record(s);
             }
-            CameraProbe.stopCombinedMp4Record(false);
+            CameraProbe.stopCombinedMp4Record(false, false);
             CameraProbe.releaseCombinedCameras();
         } catch (Throwable ignored) {
         }
@@ -2207,6 +2227,9 @@ public class RecordingService extends Service {
     private static long remaining(long deadlineMs) {
         return Math.max(1L, deadlineMs - SystemClock.elapsedRealtime());
     }
+
+    /** When the 360 view was seen asking, so the release can be timed against its patience. */
+    private volatile long oemAskedAtMs;
 
     /** What the last shutdown managed to finish, for the journal. */
     private volatile String lastQuiescenceDetail = "";

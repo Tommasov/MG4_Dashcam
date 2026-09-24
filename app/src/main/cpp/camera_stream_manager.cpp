@@ -234,6 +234,9 @@ namespace camera_stream_manager
             gClipStartCount++;
         }
 
+        /** How long the last urgent release took, in microseconds. Reported, not guessed. */
+        int64_t gLastUrgentReleaseUs = 0;
+
         /** Asked for, and actually got: a sleep on a loaded system is a lower bound. */
         long long gSleepAskedUs = 0, gSleepGotUs = 0, gSleepCount = 0;
 
@@ -2214,6 +2217,51 @@ namespace camera_stream_manager
                 return stopConsumer(slot);
             }
 
+            /**
+             * Lets a consumer go without waiting for it to finish.
+             *
+             * <p>stopConsumer() below waits for the consumer to report itself stopped, and a
+             * combined tap answers that question for the whole shared sink - so releasing the
+             * first camera waits for the entire encoder to drain. That is right when a clip is
+             * being closed properly and wrong when the factory 360 view is asking for the
+             * cameras: measured on the car, it gives up after about 210 ms, and the drain alone
+             * costs up to 230.
+             *
+             * <p>What the factory app needs is the video device, not our file. So the consumer
+             * is dropped, the capture comes down, and the encoder is left to finish into a file
+             * nobody is waiting for.
+             */
+            bool detachConsumer(int consumerId)
+            {
+                std::shared_ptr<FrameConsumer> consumer;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    auto it = consumers_.find(consumerId);
+                    if (it == consumers_.end())
+                    {
+                        return true;
+                    }
+                    consumer = it->second;
+                    consumers_.erase(it);
+                }
+                consumer->requestStop();
+
+                bool shouldStop;
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    shouldStop = (previewWindow_ == nullptr && consumers_.empty() && !keepWarm_);
+                    if (shouldStop)
+                    {
+                        stopRequested_.store(true);
+                    }
+                }
+                if (shouldStop)
+                {
+                    requestStopAndJoin();
+                }
+                return true;
+            }
+
             bool stopConsumer(int consumerId)
             {
                 std::shared_ptr<FrameConsumer> consumer;
@@ -3336,6 +3384,19 @@ namespace camera_stream_manager
 
     bool stopCombinedRecording(bool keepCamerasWarm)
     {
+        return stopCombinedRecording(keepCamerasWarm, false);
+    }
+
+    /**
+     * @param urgent the factory 360 view is waiting for these cameras and will not wait long.
+     *               Measured twice on the car, it appears and gives up again after 209 and
+     *               218 ms - a timeout in its code, not luck - and the ordinary path spends
+     *               most of that draining an encoder the factory app does not care about. In
+     *               urgent mode the four devices are freed together and in parallel, and the
+     *               clip is finalised afterwards on a thread nobody is waiting for.
+     */
+    bool stopCombinedRecording(bool keepCamerasWarm, bool urgent)
+    {
         std::shared_ptr<CombinedRecordingSink> sink;
         {
             std::lock_guard<std::mutex> combinedLock(gCombinedMutex);
@@ -3370,6 +3431,43 @@ namespace camera_stream_manager
         }
 
         sink->requestStop();
+
+        if (urgent)
+        {
+            // All four at once. Each detach ends with joining that camera's capture thread,
+            // which takes as long as one turn of its loop; done one after another that is four
+            // turns, and four turns is most of the budget the factory app allows.
+            const int64_t began = nowUs();
+            std::vector<std::thread> releases;
+            for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
+            {
+                const int videoIndex = COMBINED_VIDEO_INDICES[i];
+                const int consumerId = COMBINED_CONSUMER_ID_BASE + static_cast<int>(i);
+                releases.emplace_back([videoIndex, consumerId]() {
+                    auto session = getSession(videoIndex);
+                    if (session == nullptr)
+                    {
+                        return;
+                    }
+                    session->detachConsumer(consumerId);
+                    eraseSessionIfIdle(videoIndex, session);
+                });
+            }
+            for (auto &t : releases)
+            {
+                if (t.joinable())
+                {
+                    t.join();
+                }
+            }
+            gLastUrgentReleaseUs = nowUs() - began;
+            logi("cameras released in %lld us", (long long) gLastUrgentReleaseUs);
+
+            // The file still has to be closed properly, but nothing is waiting for it now.
+            std::thread([sink]() { sink->waitUntilStopped(STOP_WAIT_MS); }).detach();
+            return true;
+        }
+
         bool allConsumersStopped = true;
         for (size_t i = 0; i < COMBINED_VIDEO_INDICES.size(); i++)
         {
@@ -3457,6 +3555,14 @@ namespace camera_stream_manager
                          " feeding the codec %.1fms, draining it %.1fms\n",
                          gSnapUs / 1000.0 / gEncodeCount, gFooterUs / 1000.0 / gEncodeCount,
                          gFeedUs / 1000.0 / gEncodeCount, gDrainUs / 1000.0 / gEncodeCount);
+                out += line;
+            }
+            if (gLastUrgentReleaseUs > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "handing the cameras to the 360 view: %.0f ms last time"
+                         " (it gives up after about 210)\n",
+                         gLastUrgentReleaseUs / 1000.0);
                 out += line;
             }
             if (gClipStartCount > 0)

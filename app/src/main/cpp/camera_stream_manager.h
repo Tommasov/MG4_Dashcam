@@ -17,6 +17,8 @@ bool startCombinedRecording(JNIEnv* env, const std::string& outputPath,
                             int cellWidth, int cellHeight, int fps, int bitrate,
                             const std::string& signature, bool showSpeed, int cameraMask);
 bool stopCombinedRecording(bool keepCamerasWarm);
+/** keepCamerasWarm, plus urgent when the factory 360 view is waiting for the devices. */
+bool stopCombinedRecording(bool keepCamerasWarm, bool urgent);
 /** Ends a hold left over from a rotation that is not going to produce another clip. */
 void releaseCombinedCameras();
 /** Blocks until every clip has finished being pushed to the medium, or the timeout. */
