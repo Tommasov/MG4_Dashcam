@@ -120,7 +120,6 @@
     <string name="notice_event_saved">Evento salvato</string>
     <string name="notice_event_future_only">Evento: registro i prossimi spezzoni</string>
     <string name="notice_oem_pause">Dashcam in pausa per la vista 360 di serie</string>
-    <string name="notice_oem_resume">Dashcam ripartita</string>
     <string name="notice_recording_recovered">Registrazione ripresa</string>
 
     <!-- Errori -->
@@ -148,6 +147,11 @@
     <string name="settings_dashcam_storage_eject_unavailable_message">Nessuna chiavetta USB in uso.</string>
     <string name="btn_check_updates">Cerca aggiornamenti</string>
     <string name="btn_update_install">Installa</string>
+    <string name="label_status_bar_icon">Pallino di stato nella barra della vettura</string>
+    <string name="label_status_bar_icon_summary">Disegna un piccolo indicatore sopra la barra di fabbrica: rosso mentre registra, ambra quando la vista 360 ha preso le telecamere. La barra di fabbrica non accetta icone da altre app, quindi viene disegnato sopra.</string>
+    <string name="label_status_bar_icon_position">Posizione: parte dallo spazio libero a destra del climatizzatore. Trascina solo quanto basta: le icone di sistema riempiono la barra da destra e si spostano, quindi conviene restare vicino al centro.</string>
+    <string name="label_standby_diagnostics">Osserva lo spegnimento</string>
+    <string name="label_standby_diagnostics_summary">Segue le fasi dello spegnimento secondo per secondo nel diario e manda il referto da solo alla riaccensione. Serve per indagare: tienilo spento quando non stai collaudando.</string>
     <string name="label_beta_channel">Canale beta</string>
     <string name="label_beta_channel_summary">Propone versioni non ancora provate su strada. Lascialo spento se non stai collaudando.</string>
     <string name="update_badge">Aggiornamento: %1$s</string>
@@ -166,4 +170,12 @@
     <string name="update_while_recording_title">Prima ferma la registrazione</string>
     <string name="update_while_recording_message">Installare un aggiornamento riavvia l\'app, e lo spezzone in scrittura viene troncato e buttato. Ferma il loop, installa, poi riaccendilo.</string>
     <string name="update_while_recording_stop">Ferma e installa</string>
+    <string name="dashcam_error_storage_not_writable">impossibile scrivere sulla memoria scelta</string>
+    <string name="dashcam_error_grid_start_failed">le telecamere non si sono avviate</string>
+    <string name="dashcam_error_grid_stop_timeout">chiusura dello spezzone non riuscita</string>
+    <string name="dashcam_error_usb_storage">nessuna chiavetta USB disponibile</string>
+    <string name="dashcam_error_usb_read_only">la chiavetta non accetta scritture</string>
+    <string name="dashcam_error_loop_died">registrazione interrotta da un errore interno</string>
+    <string name="dashcam_error_stalled">registrazione bloccata</string>
+    <string name="dashcam_error_crash_loop">troppi riavvii, registrazione disattivata</string>
 </resources>

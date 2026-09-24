@@ -45,17 +45,41 @@ public final class StatusIconOverlay {
     private static final String TAG = "StatusIcon";
 
     /**
-     * Width of the window: the dot, a gap and three letters.
+     * Everything inside the window, as fractions of the bar's own height.
      *
-     * <p>Fixed rather than measured per label, on purpose. Every state this shows uses three
-     * characters, so a width that fits the widest fits all of them - and a window that resized
-     * itself when the state changed would shuffle sideways in the middle of the bar, which is
-     * exactly the sort of movement that catches the eye of somebody who is driving.
+     * <p>Of the height, and never of density, which is the mistake the first version made: the
+     * width was 56dp and the text was sized from the bar, and on this head unit a dp is exactly
+     * a pixel while the bar is eighty of them. So the letters were drawn nearly twice as wide as
+     * the window that held them, and all that showed was half an R. Sized from one number, the
+     * whole thing scales together whatever the screen turns out to be.
      */
-    private static final int WIDTH_DP = 56;
+    private static final float DOT_RADIUS = 0.14f;
+    private static final float LEFT_PAD = 0.16f;
+    private static final float GAP = 0.18f;
+    private static final float TEXT_SIZE = 0.42f;
+    private static final float RIGHT_PAD = 0.16f;
 
     /** How far in from the edge, so it does not land under one of theirs. */
     private static final int MARGIN_DP = 4;
+
+    /**
+     * Every word this can show. The window is made wide enough for the widest of them, so that
+     * changing state repaints in place instead of shuffling the dot sideways along the bar -
+     * movement in the corner of the eye being the one thing a dashboard should not add.
+     */
+    private static final String[] LABELS = {"REC", "360", "ERR"};
+
+    /** Measured, not assumed: three bold capitals are wider than they look. */
+    private static int windowWidthPx(int barHeightPx) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setTypeface(Typeface.DEFAULT_BOLD);
+        p.setTextSize(barHeightPx * TEXT_SIZE);
+        float widest = 0f;
+        for (String label : LABELS) {
+            widest = Math.max(widest, p.measureText(label));
+        }
+        return Math.round(barHeightPx * (LEFT_PAD + 2 * DOT_RADIUS + GAP + RIGHT_PAD) + widest);
+    }
 
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -162,9 +186,10 @@ public final class StatusIconOverlay {
         dot.setState(colour, label);
 
         final float density = context.getResources().getDisplayMetrics().density;
+        final int barHeight = statusBarHeightPx();
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                Math.round(WIDTH_DP * density),
-                statusBarHeightPx(),
+                windowWidthPx(barHeight),
+                barHeight,
                 WINDOW_TYPES[0],
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -299,16 +324,16 @@ public final class StatusIconOverlay {
         @Override
         protected void onDraw(Canvas canvas) {
             final float h = getHeight();
-            final float r = h * 0.14f;
-            final float cx = r + h * 0.16f;
+            final float r = h * DOT_RADIUS;
+            final float cx = h * LEFT_PAD + r;
             canvas.drawCircle(cx, h / 2f, r, dot);
 
-            text.setTextSize(h * 0.42f);
+            text.setTextSize(h * TEXT_SIZE);
             Paint.FontMetrics fm = text.getFontMetrics();
             // Centred on the bar by the glyphs, not by the line box: the line box carries
             // leading that would push three capitals visibly low.
             float baseline = h / 2f - (fm.ascent + fm.descent) / 2f;
-            canvas.drawText(label, cx + r + h * 0.18f, baseline, text);
+            canvas.drawText(label, cx + r + h * GAP, baseline, text);
         }
     }
 }

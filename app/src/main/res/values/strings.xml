@@ -120,7 +120,6 @@
     <string name="notice_event_saved">Event saved</string>
     <string name="notice_event_future_only">Event: recording the next clips</string>
     <string name="notice_oem_pause">Dashcam paused for the factory 360 view</string>
-    <string name="notice_oem_resume">Dashcam resumed</string>
     <string name="notice_recording_recovered">Recording resumed</string>
 
     <!-- Error notices. The subtitle strings are kept for call-site compatibility with the
@@ -172,4 +171,12 @@
     <string name="update_while_recording_title">Stop recording first</string>
     <string name="update_while_recording_message">Installing an update restarts the app, which cuts the clip being written and throws it away. Stop the loop, install, then turn it back on.</string>
     <string name="update_while_recording_stop">Stop and install</string>
+    <string name="dashcam_error_storage_not_writable">cannot write to the chosen storage</string>
+    <string name="dashcam_error_grid_start_failed">the cameras did not start</string>
+    <string name="dashcam_error_grid_stop_timeout">the clip did not close cleanly</string>
+    <string name="dashcam_error_usb_storage">no USB medium available</string>
+    <string name="dashcam_error_usb_read_only">the USB medium is not accepting writes</string>
+    <string name="dashcam_error_loop_died">recording stopped on an internal error</string>
+    <string name="dashcam_error_stalled">recording stalled</string>
+    <string name="dashcam_error_crash_loop">too many restarts, recording switched off</string>
 </resources>

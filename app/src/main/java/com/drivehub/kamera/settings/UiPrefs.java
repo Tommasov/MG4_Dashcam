@@ -105,10 +105,10 @@ public final class UiPrefs {
      * do not. So the dot goes as close to the centre as it can while still clearing it: every
      * pixel further right is a pixel nearer the edge that shifts.
      *
-     * <p>Seventy per cent to begin with, from a photograph of the bar: the climate strip ends
-     * a little past the middle, and on that top row there is nothing at all between it and the
-     * right-hand edge - the temperature, the seat heaters, Bluetooth and the signal live on the
-     * row below. So the gap is wide, and starting inside it beats starting on top of the strip.
+     * <p>Sixty-two per cent, which is where it was dragged to on the car and left: x=1025 of a
+     * 1778-pixel bar, just clear of the climate strip. Every MG4 has the same head unit and the
+     * same bar, so this is the right answer everywhere rather than a personal preference, and
+     * nobody else should have to find it again.
      *
      * <p>Still a slider rather than a number fixed here. Dragging the dot into the gap takes five seconds; finding the same
      * number by rebuilding takes a drive each time.
@@ -117,7 +117,7 @@ public final class UiPrefs {
      * untouchable, so a finger reaching for the climate panel goes straight through it.
      */
     public static int getStatusBarIconX(SharedPreferences prefs) {
-        return Math.max(0, Math.min(100, prefs.getInt(KEY_STATUS_BAR_ICON_X, 70)));
+        return Math.max(0, Math.min(100, prefs.getInt(KEY_STATUS_BAR_ICON_X, 62)));
     }
 
     public static void setStatusBarIconX(SharedPreferences prefs, int percent) {

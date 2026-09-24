@@ -53,6 +53,9 @@ all. See [Relationship to upstream](#relationship-to-upstream).
   while it has handed the cameras over, red when something is wrong. Green is checked rather
   than claimed - a watchdog turns it red if no clip has been written for three segment lengths,
   because a badge that lies is worse than no badge.
+- Can put a dot in **the car's own status bar**, so the recording state is readable without
+  opening the app. Off by default - see
+  [In the car's own status bar](#in-the-cars-own-status-bar).
 - Reads, copies and clears what the factory 360 app leaves in its own private folder - see
   [The factory app's hidden recorder](#the-factory-apps-hidden-recorder).
 - Sends a diagnostics report, on request and after a confirmation - see
@@ -110,14 +113,72 @@ The stretch is bilinear rather than something sharper: a sharper filter only inv
 encoder then pays for. Measured on real footage at equal quality, lanczos costs 61 per cent more
 bitrate, bicubic 57, bilinear 41.
 
-**A second a rotation.** Clips are cut every 30 seconds and the changeover is not free, so a
-little road goes unfilmed each time. The clip names and the chapter titles
-[join-clips.py](tools/join-clips.py) writes carry the real wall-clock time, so a gap is always
-visible and dated rather than silently closed up.
+**Nearly a second a rotation.** Clips are cut every 30 seconds and the changeover is not free,
+so a little road goes unfilmed each time - about **0.9 s**, measured on real drives. Where it
+goes is no longer a guess: the app times the two halves of starting a clip and prints them.
+
+```
+opening a clip: encoder and muxer 774ms, attaching the cameras 5ms (37 times)
+```
+
+Attaching the cameras used to be a quarter of a second on its own, because stopping a clip let
+the last consumer go and a session nobody reads from **tears its capture down** - so all four
+video devices were closed and reopened, identically, every thirty seconds. They are now held
+across a rotation, which is what took that figure to five milliseconds.
+
+What is left is building an encoder and a muxer, which means creating the output file on a stick
+that is still finishing the previous clip. It is the same shape of problem as working out where
+the next clip goes, which used to cost 200 ms and now costs zero because it happens a segment
+early. The cure is the same: prepare it while the current clip is still recording.
+
+The clip names and the chapter titles [join-clips.py](tools/join-clips.py) writes carry the real
+wall-clock time, so a gap is always visible and dated rather than silently closed up.
 
 **The bitrate stays at 9 Mbit/s**, about 58 MB a minute. It used to spend almost a fifth of
 itself on black bars; now every bit goes on picture, at the same write rate and the same load on
 the USB stick.
+
+## In the car's own status bar
+
+<p align="center">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/status-bar.jpg" alt="The head unit's top bar in two states: an amber 360 marker while the factory around-view has the cameras, and a red REC marker while the dashcam is recording" width="90%">
+</p>
+
+Red **REC** while it is recording, amber **360** while the factory around-view has the cameras
+and the dashcam is waiting its turn, **ERR** when something needs looking at. Three letters
+rather than a bare coloured dot, because a colour has to be learned and a word does not. It does
+not blink: the middle of a dashboard is the one place that should not pull the eye.
+
+**Turn it on in the settings.** It ships off, and that is deliberate rather than timid - this is
+the most conspicuous thing the app does, and whether something of yours belongs inside the
+factory interface depends on who else looks at the car.
+
+### How it gets there, and why that took three attempts
+
+The factory bar is not Android's. `com.android.systemui.statusbar` is not in this SystemUI at
+all: SAIC removed it and wrote their own, and what is in there is a **fixed set of icons whose
+visibility is toggled** - no notification icon area, no slots, nothing to register an icon with.
+The one service their SystemUI exposes to other apps turned out to speak a media-browser
+protocol, for the radio.
+
+So the dot is a window of ours, drawn on top. Which a platform-signed app running as the system
+user is allowed to do, and which still failed twice in ways worth writing down:
+
+- `TYPE_APPLICATION_OVERLAY` is as high as an ordinary app can reach, and it sits **below**
+  `TYPE_STATUS_BAR`. The window was created, positioned correctly, and invisible behind an
+  opaque bar. Two window types reserved for the platform sit above it; the app tries those
+  first and records in its log which one it got.
+- The window was sized in `dp` while its contents were sized from the bar's height. On this head
+  unit a dp is exactly a pixel and the bar is eighty of them, so the text came out wider than
+  the window holding it. Everything is now a fraction of one number - the bar height, asked of
+  the framework rather than assumed - and the width is measured from the widest word it can
+  show.
+
+**Position.** A slider, defaulting to just right of the climate strip. That is not a preference:
+the factory icons fill the bar **from the right** and move as they come and go, while the
+climate strip in the middle has a fixed width. So the only stable gap is the one next to the
+fixed thing, and the dot should be left as close to it as looks right - every pixel further
+right is a pixel nearer the row that shifts.
 
 ## Installing
 
@@ -233,6 +294,47 @@ any of this from inside the car.
 
 Use **Stop and eject USB** before pulling the stick: it stops the loop and waits for the
 pending writes instead of truncating the clip in flight.
+
+### Surviving the ignition going off
+
+FAT has no journal. A power cut while the filesystem is mid-update leaves the cluster chains and
+the directory disagreeing, and the volume comes back wrong: on this car it has come back
+mounted read-only, and it has come back reporting **zero bytes free on a stick that was not
+full**, which fails every write with `ENOSPC` and looks exactly like a stick that is finished.
+`chkdsk` finds real damage. The fix is not to survive that but to not be writing when it
+happens.
+
+The app closes its clip when the car shuts down, and holds the shutdown - briefly, and with the
+system's permission - until the medium is actually idle. Getting that right needed two things
+that were both wrong:
+
+- **It was listening for the wrong broadcast.** The close was built on `ACTION_SCREEN_OFF`, on
+  the reasonable belief that locking the car dims the display before the processor stops. It
+  does not: on this head unit the panel is switched off by hardware, outside Android, which
+  stays awake and unaware - reopen the car within a minute and the tablet is exactly where you
+  left it. That broadcast never arrives. `ACTION_SHUTDOWN` does, within a minute of locking, and
+  it is now what the close hangs on.
+- **"Clip closed" did not mean the stick was idle.** The wait watched the muxer and one of the
+  two background executors, and neither of the flush threads. So it could report a clean close
+  while retention was still **deleting expired clips** off the stick and up to 34 MB was still
+  being fsynced onto it - and deleting files is precisely what rewrites the chains and the
+  free-cluster count that came back broken. It now waits for all of them, names each one in its
+  journal, and gives up out loud rather than silently if the eight seconds a shutdown receiver
+  gets run out.
+
+There is a **standby journal** on internal storage - not on the stick, which is the fragile
+thing being protected - that survives the power going and is printed in the diagnostics report.
+It is how the above was found: between one session and the next there was no screen-off line at
+all, only `ACTION_SHUTDOWN` and then nothing.
+
+**At startup, patience.** A volume that has only just been mounted appears in `StorageManager`,
+has its directory, answers yes to `canWrite()` - and reports zero bytes free, because the FAT
+free-cluster count has not been worked out yet. Every write then fails with `ENOSPC`, which is
+indistinguishable from a full stick and is nothing of the sort. The app now waits up to two and
+a half minutes without calling any of it an error, and wakes early on the mount broadcast - the
+one the head unit shows as a "disk inserted" message. Nothing about the first fifteen seconds
+of this head unit is reliable: the factory music player misses its own scan often enough that
+sometimes it does not start either.
 
 ## The factory app's hidden recorder
 

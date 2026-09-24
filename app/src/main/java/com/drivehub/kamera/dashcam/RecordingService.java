@@ -504,9 +504,47 @@ public class RecordingService extends Service {
         filter.addAction(Intent.ACTION_USER_PRESENT);
         filter.addAction(Intent.ACTION_POWER_CONNECTED);
         filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
-        // Screen state is not deliverable from the manifest: it has to be a live receiver.
         registerReceiver(screenReceiver, filter);
+
+        // Media has to be a filter of its own: those broadcasts carry a file: URI, and a
+        // receiver without a data scheme never sees them.
+        IntentFilter media = new IntentFilter();
+        media.addAction(Intent.ACTION_MEDIA_MOUNTED);
+        media.addAction(Intent.ACTION_MEDIA_UNMOUNTED);
+        media.addAction(Intent.ACTION_MEDIA_EJECT);
+        media.addDataScheme("file");
+        registerReceiver(mediaReceiver, media);
+        // Screen state is not deliverable from the manifest: it has to be a live receiver.
     }
+
+    /**
+     * Wakes the storage wait the moment the system says a volume has arrived.
+     *
+     * <p>The wait below is a backoff, which means that when the volume becomes usable a second
+     * after an attempt, the next look is twenty seconds away. This turns that into an interrupt:
+     * recording starts when the stick is ready rather than when the next tick happens to fall.
+     */
+    private final BroadcastReceiver mediaReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent == null ? null : intent.getAction();
+            if (action == null) {
+                return;
+            }
+            String line = "media " + action.substring(action.lastIndexOf('.') + 1)
+                    + " " + intent.getData();
+            DevRuntimeLog.add("RecordingService", line);
+            // Into the journal as well, because this is the line that can be checked against
+            // something visible: the head unit puts a "disk inserted" message on screen when
+            // the volume is properly mounted, and these two should fall at the same moment. If
+            // they do, this is the signal to start on. If the message comes later, there is
+            // another stage after this one and we are still starting too early.
+            StandbyJournal.add(RecordingService.this, line);
+            synchronized (stateLock) {
+                stateLock.notifyAll();
+            }
+        }
+    };
 
     private void onScreenOff() {
         // Every one of these used to be able to leave without saying anything, and a journal
@@ -775,14 +813,14 @@ public class RecordingService extends Service {
                 stopRequested = false;
                 startForeground(NOTIF_ID, buildNotification(getString(R.string.notification_recording_starting)));
                 publishStatus(STATUS_STARTING, 0, TOTAL_CAMERAS, "");
-                if (wasPaused) {
-                    DashcamNotice.showOemResume(this);
-                }
                 worker = new Thread(this::recordLoop, "RecordingServiceWorker");
                 worker.start();
             } else if (wasPaused) {
+                // No toast on the way back. Handing the cameras to the 360 view and taking them
+                // back again happens several times a drive, and the message said nothing the
+                // driver could act on - the dot in the status bar now says the same thing
+                // without covering the screen for two seconds each time.
                 publishStatus(STATUS_STARTING, 0, TOTAL_CAMERAS, "");
-                DashcamNotice.showOemResume(this);
             }
             return START_STICKY;
         }
@@ -1855,8 +1893,24 @@ public class RecordingService extends Service {
      * @param initial true on the first resolution of a recording session — suppresses
      *                the USB↔internal transition banner that only makes sense mid-session.
      */
-    /** Backoff for the wait below: about half a minute in all, most of it in the first seconds. */
-    private static final long[] STORAGE_WAIT_MS = {0L, 1_000L, 2_000L, 4_000L, 8_000L, 15_000L};
+    /**
+     * Backoff for the wait below: quick at first, then patient for a couple of minutes.
+     *
+     * <p>It used to give up after half a minute, and that was the whole of the trouble at
+     * startup. A volume that has only just been mounted turns up in StorageManager, has its
+     * directory, answers yes to canWrite() - and reports <b>zero bytes free</b>, because the
+     * free-cluster count of the FAT has not been worked out yet. Every write then fails with
+     * ENOSPC, which reads exactly like a full stick and is nothing of the sort: the same stick
+     * started by hand a minute later records perfectly.
+     *
+     * <p>So the retries now run for about two and a half minutes. It costs nothing when the
+     * volume is ready at once, and nothing is reported as an error in the meantime - the wait
+     * only announces a failure on its last attempt. The mount broadcast below usually cuts it
+     * short long before that.
+     */
+    private static final long[] STORAGE_WAIT_MS = {
+            0L, 1_000L, 2_000L, 4_000L, 8_000L, 15_000L,
+            20_000L, 20_000L, 20_000L, 30_000L, 30_000L};
 
     /** Why the last resolution failed, so the wait above can say it out loud. */
     private DashcamStorageManager.UsbState lastResolveUsbState =
@@ -1897,12 +1951,17 @@ public class RecordingService extends Service {
             boolean lastTry = attempt == STORAGE_WAIT_MS.length - 1;
             File dir = resolveActiveBaseDir(true, lastTry);
             if (dir != null) {
+                String line = String.format(Locale.US,
+                        "storage ready on attempt %d/%d after %.1fs",
+                        attempt + 1, STORAGE_WAIT_MS.length,
+                        (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0);
                 if (attempt > 0) {
-                    DevRuntimeLog.add("RecordingService", String.format(Locale.US,
-                            "storage ready on attempt %d/%d after %.1fs",
-                            attempt + 1, STORAGE_WAIT_MS.length,
-                            (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0));
+                    DevRuntimeLog.add("RecordingService", line);
                 }
+                // In the journal too, and on every start including the immediate ones: whether
+                // the stick is ready at once or after a minute is the question, and answering
+                // it from memory across days of driving is not answering it.
+                StandbyJournal.add(this, line);
                 return dir;
             }
             // Every attempt says something now. This wait used to be silent unless it
@@ -1914,6 +1973,9 @@ public class RecordingService extends Service {
                     (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0,
                     lastResolveUsbState));
         }
+        StandbyJournal.add(this, String.format(Locale.US,
+                "storage never became usable: gave up after %.0fs, %s",
+                (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0, lastResolveUsbState));
         return null;
     }
 
@@ -2214,7 +2276,51 @@ public class RecordingService extends Service {
             return context.getString(R.string.settings_dashcam_status_starting);
         }
         String error = lastError == null || lastError.trim().isEmpty() ? status : lastError.trim();
-        return context.getString(R.string.settings_dashcam_status_error, error);
+        return context.getString(R.string.settings_dashcam_status_error,
+                describeError(context, error));
+    }
+
+    /**
+     * Turns an internal error code into something a driver can read, in their own language.
+     *
+     * <p>The codes are constants like {@code "usb volume read only"}, and they were being put
+     * straight on screen inside an otherwise translated sentence. They are also what gets saved
+     * and compared, so they stay exactly as they are and only the rendering changes.
+     *
+     * <p>Anything unrecognised falls through unchanged rather than disappearing: a code with no
+     * message is still better than no message at all.
+     */
+    private static String describeError(Context context, String code) {
+        final int res;
+        switch (code) {
+            case ERROR_STORAGE_NOT_WRITABLE:
+                res = R.string.dashcam_error_storage_not_writable;
+                break;
+            case ERROR_GRID_START_FAILED:
+                res = R.string.dashcam_error_grid_start_failed;
+                break;
+            case ERROR_GRID_STOP_TIMEOUT:
+                res = R.string.dashcam_error_grid_stop_timeout;
+                break;
+            case ERROR_USB_STORAGE:
+                res = R.string.dashcam_error_usb_storage;
+                break;
+            case ERROR_USB_READ_ONLY:
+                res = R.string.dashcam_error_usb_read_only;
+                break;
+            case ERROR_LOOP_DIED:
+                res = R.string.dashcam_error_loop_died;
+                break;
+            case ERROR_STALLED:
+                res = R.string.dashcam_error_stalled;
+                break;
+            case ERROR_CRASH_LOOP:
+                res = R.string.dashcam_error_crash_loop;
+                break;
+            default:
+                return code;
+        }
+        return context.getString(res);
     }
 
     /**
@@ -2260,7 +2366,8 @@ public class RecordingService extends Service {
         } else if (STATUS_PAUSED_OEM.equals(status)) {
             notificationText = getString(R.string.notification_recording_paused_oem);
         } else if (STATUS_PARTIAL.equals(status) || STATUS_ERROR.equals(status)) {
-            notificationText = getString(R.string.notification_recording_error, lastError);
+            notificationText = getString(R.string.notification_recording_error,
+                    describeError(this, lastError));
         } else if (STATUS_STARTING.equals(status)) {
             notificationText = getString(R.string.notification_recording_starting);
         } else {
@@ -2531,6 +2638,11 @@ public class RecordingService extends Service {
         if (screenReceiver != null) {
             try {
                 unregisterReceiver(screenReceiver);
+            } catch (Throwable ignored) {
+                // Never registered, or already gone.
+            }
+            try {
+                unregisterReceiver(mediaReceiver);
             } catch (Throwable ignored) {
                 // Already gone: the service is being torn down either way.
             }

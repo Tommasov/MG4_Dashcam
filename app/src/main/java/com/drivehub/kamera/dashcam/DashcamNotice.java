@@ -36,10 +36,6 @@ public final class DashcamNotice {
         show(context, R.string.notice_oem_pause, "oem pause");
     }
 
-    public static void showOemResume(Context context) {
-        show(context, R.string.notice_oem_resume, "oem resume");
-    }
-
     public static void showRecordingRecovered(Context context) {
         show(context, R.string.notice_recording_recovered, "recording recovered");
     }
