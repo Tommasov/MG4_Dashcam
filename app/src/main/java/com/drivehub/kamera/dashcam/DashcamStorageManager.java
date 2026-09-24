@@ -58,6 +58,12 @@ public final class DashcamStorageManager {
     private static final String EVENTS_DIR_NAME = "events";
     private static final String CLIP_SUFFIX = ".mp4";
     private static final String WRITE_PROBE_FILE_NAME = ".dashcam_write_probe";
+
+    /** Tells Android's media scanner to leave this folder, and everything under it, alone. */
+    private static final String NOMEDIA_FILE_NAME = ".nomedia";
+
+    /** The folder the marker was last put in, so it is offered once per medium and not forced. */
+    private static final String KEY_NOMEDIA_PLACED_IN = "noMediaPlacedIn";
     private static final File LEGACY_STORAGE_ROOT = new File("/storage");
     /** Where vold mounts removable media before the per-app FUSE view is layered on. */
     private static final File MEDIA_RW_ROOT = new File("/mnt/media_rw");
@@ -304,27 +310,67 @@ public final class DashcamStorageManager {
      * Resolves the storage target for the configured mode. Performs real IO (USB write test)
      * unless the mode is INTERNAL_ONLY — do not call on the main thread.
      */
+    /**
+     * Offers the clips folder to the media scanner once, and then never argues about it.
+     *
+     * <p>The clips are indexed today - they show up in the factory video player - and indexing
+     * them is pure waste on both sides. Their names are timestamps and the ring buffer replaces
+     * them continuously, so every scan meets a hundred files it has never seen, opens each one
+     * to read its metadata, and writes rows that are stale within the hour. None of it is ever
+     * reused. On this head unit that happens while the volume is being mounted, which is the
+     * least helpful moment available: the first seconds after the screen appears are when the
+     * factory music player misses its own scan and the storage is at its slowest.
+     *
+     * <p>Written once per folder and recorded, rather than checked and restored every time.
+     * Somebody who wants their clips in the car's video player can delete this file and keep
+     * it deleted - it is on their medium, not ours, and putting it back would be insisting.
+     */
+    private static void offerNoMediaOnce(Context context, File dir) {
+        if (dir == null) {
+            return;
+        }
+        SharedPreferences prefs = UiPrefs.getPrefs(context);
+        String path = dir.getAbsolutePath();
+        if (path.equals(prefs.getString(KEY_NOMEDIA_PLACED_IN, ""))) {
+            return;
+        }
+        File marker = new File(dir, NOMEDIA_FILE_NAME);
+        try {
+            if (marker.exists() || marker.createNewFile()) {
+                prefs.edit().putString(KEY_NOMEDIA_PLACED_IN, path).apply();
+                Log.i(TAG, "media scanner marker in place at " + path);
+            }
+        } catch (Throwable t) {
+            // A medium that will not take an empty file has larger problems, and they will be
+            // reported by the write probe in a way that says more than this could.
+            Log.w(TAG, "could not place " + NOMEDIA_FILE_NAME + " in " + path, t);
+        }
+    }
+
     public static Resolution resolve(Context context) {
         SharedPreferences prefs = UiPrefs.getPrefs(context);
         int target = getStorageTarget(prefs);
 
         if (target == TARGET_INTERNAL_ONLY) {
-            return new Resolution(
-                    DashcamSettings.getRecordsBaseDir(context),
-                    false, target, UsbState.NOT_CHECKED);
+            File internal = DashcamSettings.getRecordsBaseDir(context);
+            // Internal is a public Downloads folder, so it is indexed even more certainly than
+            // a stick is.
+            offerNoMediaOnce(context, internal);
+            return new Resolution(internal, false, target, UsbState.NOT_CHECKED);
         }
 
         UsbProbe probe = probeUsb(context, null);
         if (probe.state == UsbState.OK) {
+            offerNoMediaOnce(context, probe.recordsDir);
             return new Resolution(probe.recordsDir, true, target, UsbState.OK);
         }
         if (target == TARGET_USB_ONLY) {
             return new Resolution(null, false, target, probe.state);
         }
         // AUTO: fall back to internal, but keep the probe result so callers can surface it.
-        return new Resolution(
-                DashcamSettings.getRecordsBaseDir(context),
-                false, target, probe.state);
+        File internal = DashcamSettings.getRecordsBaseDir(context);
+        offerNoMediaOnce(context, internal);
+        return new Resolution(internal, false, target, probe.state);
     }
 
     /**
