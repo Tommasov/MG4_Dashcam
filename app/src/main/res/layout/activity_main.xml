@@ -165,6 +165,25 @@
              middle of a scrolling page: reaching for the page and moving the dot instead is a
              mistake that only happens while driving. The position is already the measured one,
              so almost nobody needs to open this. -->
+        <RadioGroup
+            android:id="@+id/rgStatusBarIconSide"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/rbStatusIconLeft"
+                style="@style/Choice"
+                android:layout_width="wrap_content"
+                android:text="@string/status_icon_side_left" />
+
+            <RadioButton
+                android:id="@+id/rbStatusIconRight"
+                style="@style/Choice"
+                android:layout_width="wrap_content"
+                android:text="@string/status_icon_side_right" />
+        </RadioGroup>
+
         <TextView
             android:id="@+id/tvStatusBarIconAdjust"
             style="@style/Hint"

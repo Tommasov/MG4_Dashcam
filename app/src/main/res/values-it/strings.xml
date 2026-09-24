@@ -184,4 +184,6 @@
     <string name="usage_clips_plus_current">%1$s, oltre a quella in registrazione</string>
     <string name="dashcam_error_usb_full">spazio esaurito, e non restano nostre clip da cancellare</string>
     <string name="notification_recording_idle">Non sta registrando</string>
+    <string name="status_icon_side_left">A sinistra del clima</string>
+    <string name="status_icon_side_right">A destra del clima</string>
 </resources>

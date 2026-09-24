@@ -185,4 +185,6 @@
     <string name="usage_clips_plus_current">%1$s plus the one being recorded</string>
     <string name="dashcam_error_usb_full">no room left, and no clips of ours left to remove</string>
     <string name="notification_recording_idle">Not recording</string>
+    <string name="status_icon_side_left">Left of the climate strip</string>
+    <string name="status_icon_side_right">Right of the climate strip</string>
 </resources>

@@ -177,6 +177,23 @@ public class MainActivity extends AppCompatActivity {
             // Turning a switch and seeing nothing happen reads as a switch that does nothing.
             RecordingService.refreshStatusIcon(this);
         });
+        RadioGroup side = findViewById(R.id.rgStatusBarIconSide);
+        syncStatusIconSide(side);
+        side.setOnCheckedChangeListener((g, checked) -> {
+            if (syncing) {
+                return;
+            }
+            UiPrefs.setStatusBarIconX(prefs(),
+                    checked == R.id.rbStatusIconLeft
+                            ? UiPrefs.STATUS_BAR_ICON_LEFT
+                            : UiPrefs.STATUS_BAR_ICON_RIGHT);
+            SeekBar bar = findViewById(R.id.sbStatusBarIconX);
+            syncing = true;
+            bar.setProgress(UiPrefs.getStatusBarIconX(prefs()));
+            syncing = false;
+            RecordingService.refreshStatusIcon(this);
+        });
+
         View adjust = findViewById(R.id.tvStatusBarIconAdjust);
         View dotXGroup = findViewById(R.id.grpStatusBarIconX);
         adjust.setOnClickListener(v -> {
@@ -195,6 +212,10 @@ public class MainActivity extends AppCompatActivity {
                 // Live, so the dot follows the finger: a position you have to guess and then
                 // check is the thing this control exists to avoid.
                 UiPrefs.setStatusBarIconX(prefs(), value);
+                // Dragged by hand, so neither side is the answer any more unless it happens to
+                // land exactly on one. A radio button left lit on a position nobody chose is
+                // worse than none lit at all.
+                syncStatusIconSide(findViewById(R.id.rgStatusBarIconSide));
                 RecordingService.refreshStatusIcon(MainActivity.this);
             }
 
@@ -765,11 +786,32 @@ public class MainActivity extends AppCompatActivity {
      * colour of the car's own launcher, and disappears the moment it is switched on: an
      * invitation, not a nag.
      */
+    /** Lights the side that matches the stored position, or neither if it is between them. */
+    private void syncStatusIconSide(RadioGroup group) {
+        if (group == null) {
+            return;
+        }
+        int x = UiPrefs.getStatusBarIconX(prefs());
+        syncing = true;
+        if (x == UiPrefs.STATUS_BAR_ICON_LEFT) {
+            group.check(R.id.rbStatusIconLeft);
+        } else if (x == UiPrefs.STATUS_BAR_ICON_RIGHT) {
+            group.check(R.id.rbStatusIconRight);
+        } else {
+            group.clearCheck();
+        }
+        syncing = false;
+    }
+
     private void showStatusIconInvite(boolean enabled) {
         View invite = findViewById(R.id.tvStatusBarIconInvite);
         View summary = findViewById(R.id.tvStatusBarIconSummary);
         View adjust = findViewById(R.id.tvStatusBarIconAdjust);
         View group = findViewById(R.id.grpStatusBarIconX);
+        View sides = findViewById(R.id.rgStatusBarIconSide);
+        if (sides != null) {
+            sides.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        }
         if (invite != null) {
             invite.setVisibility(enabled ? View.GONE : View.VISIBLE);
         }

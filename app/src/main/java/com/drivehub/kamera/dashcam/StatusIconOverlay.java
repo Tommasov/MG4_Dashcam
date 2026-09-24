@@ -91,6 +91,7 @@ public final class StatusIconOverlay {
     private boolean standardRouteTried;
     private int placedAtPercent = -1;
     private boolean quietlyOff;
+    private String shownLabel = "";
 
     private int wantedPercent() {
         return UiPrefs.getStatusBarIconX(UiPrefs.getPrefs(context));
@@ -192,9 +193,14 @@ public final class StatusIconOverlay {
 
     private void show(int colour, @NonNull String label, boolean fault) {
         if (view != null && placedAtPercent == wantedPercent()) {
+            if (!label.equals(shownLabel)) {
+                shownLabel = label;
+                DevRuntimeLog.add(TAG, "now showing " + label);
+            }
             view.setState(colour, label, fault);
             return;
         }
+        shownLabel = label;
         // The dot has been moved: the window has to be laid out again, not just repainted.
         removeNow();
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
@@ -229,8 +235,11 @@ public final class StatusIconOverlay {
                 wm.addView(dot, lp);
                 windowManager = wm;
                 view = dot;
-                DevRuntimeLog.add(TAG, "overlay shown as " + nameOfType(type) + ", "
-                        + lp.width + "x" + lp.height + "px at x=" + lp.x
+                // Which word it is showing, not only that it is showing something: OFF and
+                // the fault triangle can otherwise only be confirmed by whoever is sitting in
+                // the car, which is no use at all when the car belongs to somebody else.
+                DevRuntimeLog.add(TAG, "overlay shown as " + nameOfType(type) + " [" + label
+                        + "], " + lp.width + "x" + lp.height + "px at x=" + lp.x
                         + " of " + screenWidth + " (" + placedAtPercent + "%)"
                         + (refusals.length() == 0 ? "" : "; first tried" + refusals));
                 break;

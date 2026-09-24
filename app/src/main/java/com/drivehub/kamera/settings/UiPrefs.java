@@ -120,6 +120,18 @@ public final class UiPrefs {
         return Math.max(0, Math.min(100, prefs.getInt(KEY_STATUS_BAR_ICON_X, 62)));
     }
 
+    /**
+     * The two positions worth offering, either side of the climate strip.
+     *
+     * <p>The strip is in the middle of the bar on every MG4 and does not move, so these are
+     * mirror images of each other about it. Which side is free depends on the car: the system
+     * icons grow in from the right, the now-playing text grows in from the left, and both of
+     * those edges move while the middle does not. So each choice hugs the centre rather than
+     * reaching for an edge.
+     */
+    public static final int STATUS_BAR_ICON_LEFT = 38;
+    public static final int STATUS_BAR_ICON_RIGHT = 62;
+
     public static void setStatusBarIconX(SharedPreferences prefs, int percent) {
         prefs.edit().putInt(KEY_STATUS_BAR_ICON_X, Math.max(0, Math.min(100, percent))).apply();
     }
