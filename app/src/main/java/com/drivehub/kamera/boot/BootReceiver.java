@@ -1,7 +1,9 @@
 package com.drivehub.kamera.boot;
 
 import com.drivehub.kamera.MainActivity;
+import com.drivehub.kamera.dashcam.DashcamSettings;
 import com.drivehub.kamera.dashcam.RecordingService;
+import com.drivehub.kamera.settings.UiPrefs;
 import com.drivehub.kamera.dev.DevRuntimeLog;
 
 import android.content.BroadcastReceiver;
@@ -30,6 +32,17 @@ public class BootReceiver extends BroadcastReceiver {
         final boolean replaced = Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
         if (!booted && !replaced) {
             return;
+        }
+
+        if (replaced) {
+            android.content.SharedPreferences prefs = UiPrefs.getPrefs(context);
+            if (DashcamSettings.consumeStoppedForUpdate(prefs)) {
+                // The loop was on until the update asked it to stop. Nobody wanted it off; they
+                // wanted a newer app. Putting it back finishes what was started rather than
+                // making a decision of its own.
+                DevRuntimeLog.add(TAG, "loop was stopped for the update; switching it back on");
+                DashcamSettings.setEnabled(prefs, true);
+            }
         }
 
         try {

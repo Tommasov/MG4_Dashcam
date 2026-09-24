@@ -358,7 +358,7 @@ public class RecordingService extends Service {
                 + "version: " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")" + "\n"
                 + "fingerprint: " + Build.FINGERPRINT + "\n"
                 + "service starts: " + prefs().getInt(KEY_SERVICE_STARTS, 0) + "\n\n"
-                + "== what happened at the last standby ==" + "\n"
+                + "== standby journal (oldest first) ==" + "\n"
                 + StandbyJournal.snapshot(this) + "\n"
                 + "== runtime log ==" + "\n"
                 + DevRuntimeLog.snapshot() + "\n";

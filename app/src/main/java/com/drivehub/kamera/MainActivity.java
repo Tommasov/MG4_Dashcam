@@ -325,6 +325,7 @@ public class MainActivity extends AppCompatActivity {
                         // The same path the switch takes, so the service is stopped rather
                         // than left running against a preference that says it should not be.
                         DashcamSettings.setEnabled(prefs(), false);
+                        DashcamSettings.rememberStoppedForUpdate(prefs());
                         RecordingService.stopIfRunning(this);
                         swEnabled.setChecked(false);
                         onInstallChosen(info);
@@ -460,6 +461,8 @@ public class MainActivity extends AppCompatActivity {
         swEnabled.setOnCheckedChangeListener((v, checked) -> {
             if (syncing) return;
             DashcamSettings.setEnabled(prefs(), checked);
+            // A switch touched by hand outranks anything remembered from an update.
+            DashcamSettings.forgetStoppedForUpdate(prefs());
             if (checked) {
                 RecordingService.startIfDashcamEnabled(this);
             } else {
@@ -794,8 +797,13 @@ public class MainActivity extends AppCompatActivity {
                 .append(safeOemListing());
         sb.append("\n").append("== what android recorded about our deaths ==").append("\n")
                 .append(CrashTrail.describe());
-        sb.append("\n").append("== what happened at the last standby ==")
-                .append("\n").append(StandbyJournal.snapshot(this));
+        // Named for what it is. It used to say "what happened at the last standby",
+        // which is a promise it does not keep: it is a rolling window, so it routinely
+        // carries entries from days ago under a heading that implies one event.
+        sb.append("\n").append("== standby journal (last ")
+                .append(StandbyJournal.maxLines())
+                .append(" entries, oldest first) ==").append("\n")
+                .append(StandbyJournal.snapshot(this));
         sb.append("\n").append("== runtime log ==").append("\n")
                 .append(DevRuntimeLog.snapshot()).append("\n");
         return sb.toString();

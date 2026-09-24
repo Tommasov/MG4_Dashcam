@@ -42,6 +42,11 @@ public final class StandbyJournal {
     /** Enough for several ignition cycles, far too little to be worth managing. */
     private static final int MAX_LINES = 40;
 
+    /** So the report can say how far back this goes instead of implying it is one event. */
+    public static int maxLines() {
+        return MAX_LINES;
+    }
+
     private static final Object LOCK = new Object();
     private static final SimpleDateFormat STAMP =
             new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);

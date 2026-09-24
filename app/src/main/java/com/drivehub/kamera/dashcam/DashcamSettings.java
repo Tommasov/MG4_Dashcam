@@ -21,6 +21,40 @@ public final class DashcamSettings {
 
     public static final String KEY_ENABLED = "enabled";
 
+    /**
+     * When the loop was switched off only so that an update could install.
+     *
+     * <p>Installing replaces the package and kills the process, so the app asks to stop the loop
+     * first rather than lose the clip in flight. Which left the switch off afterwards, and the
+     * driver having to notice and turn it back on - for a stop nobody asked for. This is the
+     * timestamp of that stop; it is honoured once, soon, and only after an update.
+     */
+    public static final String KEY_STOPPED_FOR_UPDATE_MS = "stoppedForUpdateMs";
+
+    /** Long enough for a download and an install, short enough not to surprise anybody later. */
+    private static final long STOPPED_FOR_UPDATE_VALID_MS = 30L * 60L * 1000L;
+
+    public static void rememberStoppedForUpdate(SharedPreferences prefs) {
+        prefs.edit().putLong(KEY_STOPPED_FOR_UPDATE_MS, System.currentTimeMillis()).apply();
+    }
+
+    public static void forgetStoppedForUpdate(SharedPreferences prefs) {
+        prefs.edit().remove(KEY_STOPPED_FOR_UPDATE_MS).apply();
+    }
+
+    /**
+     * True once, if the loop was stopped for an update that has just happened.
+     *
+     * <p>Consumed whatever the answer, so a cancelled update cannot leave the loop armed to
+     * switch itself on at some unrelated moment weeks later.
+     */
+    public static boolean consumeStoppedForUpdate(SharedPreferences prefs) {
+        long at = prefs.getLong(KEY_STOPPED_FOR_UPDATE_MS, 0L);
+        forgetStoppedForUpdate(prefs);
+        long age = System.currentTimeMillis() - at;
+        return at > 0L && age >= 0L && age < STOPPED_FOR_UPDATE_VALID_MS;
+    }
+
     public static final int DEFAULT_SEGMENT_SEC = 30;
     public static final int DEFAULT_RETENTION_CLIP_COUNT = 10;
     public static final int DEFAULT_MAX_RETAINED_EVENT_DIRS = 5;
