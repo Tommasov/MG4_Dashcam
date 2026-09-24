@@ -169,8 +169,10 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnCheckUpdates).setOnClickListener(v -> checkForUpdates());
         SwitchCompat statusDot = findViewById(R.id.swStatusBarIcon);
         statusDot.setChecked(UiPrefs.isStatusBarIcon(prefs()));
+        showStatusIconInvite(UiPrefs.isStatusBarIcon(prefs()));
         statusDot.setOnCheckedChangeListener((b, checked) -> {
             UiPrefs.setStatusBarIcon(prefs(), checked);
+            showStatusIconInvite(checked);
             // The service redraws the dot on its next status update, which may be a clip away.
             // Turning a switch and seeing nothing happen reads as a switch that does nothing.
             RecordingService.refreshStatusIcon(this);
@@ -736,6 +738,27 @@ public class MainActivity extends AppCompatActivity {
      * driver was trying to do. The dialog also spells out exactly what is in the report, which
      * is the only way someone can consent to sending it.
      */
+    /**
+     * The coloured line that offers the status dot, and stops offering once it is taken.
+     *
+     * <p>Off by default is the right default - drawing inside the factory interface is not a
+     * decision to make for somebody else - but a default nobody knows about is a feature nobody
+     * has. A report from another car showed exactly that: the switch untouched, because there
+     * was nothing to suggest it was worth touching. So it says what you get, in the accent
+     * colour of the car's own launcher, and disappears the moment it is switched on: an
+     * invitation, not a nag.
+     */
+    private void showStatusIconInvite(boolean enabled) {
+        View invite = findViewById(R.id.tvStatusBarIconInvite);
+        View summary = findViewById(R.id.tvStatusBarIconSummary);
+        if (invite != null) {
+            invite.setVisibility(enabled ? View.GONE : View.VISIBLE);
+        }
+        if (summary != null) {
+            summary.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        }
+    }
+
     private void confirmSendProbe() {
         // The note field is built with the scaled context too, or it would stay small while the
         // title and buttons around it grew.

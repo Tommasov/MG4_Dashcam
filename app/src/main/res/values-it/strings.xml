@@ -179,4 +179,5 @@
     <string name="dashcam_error_stalled">registrazione bloccata</string>
     <string name="dashcam_error_crash_loop">troppi riavvii, registrazione disattivata</string>
     <string name="update_installing_will_restart">Installazione in corso. L\'app si chiude e torna da sola.</string>
+    <string name="label_status_bar_icon_invite">Provala: mentre registra compare un REC rosso in alto, accanto al climatizzatore, e diventa ambra quando la vista 360 di serie prende le telecamere.</string>
 </resources>

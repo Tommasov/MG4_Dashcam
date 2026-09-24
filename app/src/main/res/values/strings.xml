@@ -180,4 +180,5 @@
     <string name="dashcam_error_stalled">recording stalled</string>
     <string name="dashcam_error_crash_loop">too many restarts, recording switched off</string>
     <string name="update_installing_will_restart">Installing the update. The app will close and come back on its own.</string>
+    <string name="label_status_bar_icon_invite">Try it: while it is recording you get a red REC at the top of the screen, beside the climate strip, and amber when the factory 360 view has the cameras.</string>
 </resources>

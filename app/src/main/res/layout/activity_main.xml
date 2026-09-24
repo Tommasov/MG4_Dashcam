@@ -133,6 +133,46 @@
             android:maxWidth="@dimen/text_measure_max"
             android:text="@string/dashcam_enabled_summary" />
 
+        <!-- Directly under the loop switch, and not in a section further down, because a
+             setting nobody finds is a setting nobody has. It belongs next to this one anyway:
+             one turns the recording on, the other is how you can tell from the driver's seat
+             that it is on. The invitation below shows only while it is off. -->
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swStatusBarIcon"
+            style="@style/Choice"
+            android:layout_width="wrap_content"
+            app:switchPadding="@dimen/switch_padding"
+            android:background="@null"
+            android:thumb="@drawable/switch_thumb_selector"
+            app:track="@drawable/switch_track_selector"
+            android:layout_marginTop="@dimen/row_gap"
+            android:text="@string/label_status_bar_icon" />
+
+        <TextView
+            android:id="@+id/tvStatusBarIconInvite"
+            style="@style/Hint"
+            android:maxWidth="@dimen/text_measure_max"
+            android:textColor="@color/accent"
+            android:text="@string/label_status_bar_icon_invite" />
+
+        <TextView
+            android:id="@+id/tvStatusBarIconSummary"
+            style="@style/Hint"
+            android:maxWidth="@dimen/text_measure_max"
+            android:text="@string/label_status_bar_icon_summary" />
+
+        <TextView
+            android:id="@+id/tvStatusBarIconX"
+            style="@style/Hint"
+            android:maxWidth="@dimen/text_measure_max"
+            android:text="@string/label_status_bar_icon_position" />
+
+        <SeekBar
+            android:id="@+id/sbStatusBarIconX"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100" />
+
         <View style="@style/Hairline" />
 
         <!-- Two columns -->
@@ -390,31 +430,6 @@
                 <TextView
                     style="@style/Hint"
                     android:text="@string/label_oem_max_speed_summary" />
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/swStatusBarIcon"
-                    style="@style/Choice"
-                    android:layout_width="wrap_content"
-                    app:switchPadding="@dimen/switch_padding"
-                    android:background="@null"
-                    android:thumb="@drawable/switch_thumb_selector"
-                    app:track="@drawable/switch_track_selector"
-                    android:text="@string/label_status_bar_icon" />
-
-                <TextView
-                    style="@style/Hint"
-                    android:text="@string/label_status_bar_icon_summary" />
-
-                <TextView
-                    android:id="@+id/tvStatusBarIconX"
-                    style="@style/Hint"
-                    android:text="@string/label_status_bar_icon_position" />
-
-                <SeekBar
-                    android:id="@+id/sbStatusBarIconX"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:max="100" />
 
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/swStandbyDiagnostics"
