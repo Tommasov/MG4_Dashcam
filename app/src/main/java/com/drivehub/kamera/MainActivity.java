@@ -177,6 +177,13 @@ public class MainActivity extends AppCompatActivity {
             // Turning a switch and seeing nothing happen reads as a switch that does nothing.
             RecordingService.refreshStatusIcon(this);
         });
+        View adjust = findViewById(R.id.tvStatusBarIconAdjust);
+        View dotXGroup = findViewById(R.id.grpStatusBarIconX);
+        adjust.setOnClickListener(v -> {
+            boolean showing = dotXGroup.getVisibility() == View.VISIBLE;
+            dotXGroup.setVisibility(showing ? View.GONE : View.VISIBLE);
+        });
+
         SeekBar dotX = findViewById(R.id.sbStatusBarIconX);
         dotX.setProgress(UiPrefs.getStatusBarIconX(prefs()));
         dotX.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -581,17 +588,27 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             mainHandler.post(() -> {
+                // One of the files on the medium is the clip being written right now, which is
+                // why a retention of a hundred shows a hundred and one and reads as an error.
+                // It is not: the counted number is true, it was only never explained. The one
+                // in flight is named separately so the rest matches the setting.
+                boolean recording = RecordingService.STATUS_RECORDING.equals(
+                        RecordingService.readPersistedStatus(prefs()).status);
+                int finished = recording ? Math.max(0, measured.clipCount - 1)
+                        : measured.clipCount;
+                String clips = quantity(R.plurals.usage_clips, finished);
+                if (recording && measured.clipCount > 0) {
+                    clips = getString(R.string.usage_clips_plus_current, clips);
+                }
                 if (measured.isEmpty()) {
                     usage.setText(R.string.storage_usage_empty);
                 } else if (measured.eventCount > 0) {
                     usage.setText(getString(R.string.storage_usage,
-                            formatSize(measured.totalBytes()),
-                            quantity(R.plurals.usage_clips, measured.clipCount),
+                            formatSize(measured.totalBytes()), clips,
                             quantity(R.plurals.usage_events, measured.eventCount)));
                 } else {
                     usage.setText(getString(R.string.storage_usage_no_events,
-                            formatSize(measured.totalBytes()),
-                            quantity(R.plurals.usage_clips, measured.clipCount)));
+                            formatSize(measured.totalBytes()), clips));
                 }
             });
         });
@@ -751,11 +768,21 @@ public class MainActivity extends AppCompatActivity {
     private void showStatusIconInvite(boolean enabled) {
         View invite = findViewById(R.id.tvStatusBarIconInvite);
         View summary = findViewById(R.id.tvStatusBarIconSummary);
+        View adjust = findViewById(R.id.tvStatusBarIconAdjust);
+        View group = findViewById(R.id.grpStatusBarIconX);
         if (invite != null) {
             invite.setVisibility(enabled ? View.GONE : View.VISIBLE);
         }
         if (summary != null) {
             summary.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        }
+        // Nothing to position while there is no dot: switched off, this is one line of offer
+        // rather than three lines of settings for something that is not on screen.
+        if (adjust != null) {
+            adjust.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        }
+        if (group != null && !enabled) {
+            group.setVisibility(View.GONE);
         }
     }
 

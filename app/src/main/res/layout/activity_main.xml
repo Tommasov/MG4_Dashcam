@@ -161,17 +161,41 @@
             android:maxWidth="@dimen/text_measure_max"
             android:text="@string/label_status_bar_icon_summary" />
 
+        <!-- Folded away, because it spans the whole width of the tablet and sits in the
+             middle of a scrolling page: reaching for the page and moving the dot instead is a
+             mistake that only happens while driving. The position is already the measured one,
+             so almost nobody needs to open this. -->
         <TextView
-            android:id="@+id/tvStatusBarIconX"
+            android:id="@+id/tvStatusBarIconAdjust"
             style="@style/Hint"
             android:maxWidth="@dimen/text_measure_max"
-            android:text="@string/label_status_bar_icon_position" />
+            android:textColor="@color/accent"
+            android:paddingTop="@dimen/row_gap"
+            android:paddingBottom="@dimen/row_gap"
+            android:text="@string/label_status_bar_icon_adjust" />
 
-        <SeekBar
-            android:id="@+id/sbStatusBarIconX"
+        <LinearLayout
+            android:id="@+id/grpStatusBarIconX"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:max="100" />
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvStatusBarIconX"
+                style="@style/Hint"
+                android:maxWidth="@dimen/text_measure_max"
+                android:text="@string/label_status_bar_icon_position" />
+
+            <SeekBar
+                android:id="@+id/sbStatusBarIconX"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="@dimen/row_gap"
+                android:paddingBottom="@dimen/row_gap"
+                android:thumb="@drawable/seek_thumb"
+                android:max="100" />
+        </LinearLayout>
 
         <View style="@style/Hairline" />
 

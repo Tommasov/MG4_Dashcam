@@ -1,0 +1,10 @@
+<!-- A thumb sized for a finger in a moving car, not for a mouse. The stock one is about a third
+     of this and was reported as hard to catch, which on a control that sits across the whole
+     width of a tablet means grabbing the page instead and scrolling it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/accent" />
+    <size
+        android:width="40dp"
+        android:height="40dp" />
+</shape>
