@@ -110,18 +110,21 @@ public final class StatusIconOverlay {
      */
     public void update(@Nullable String status) {
         main.post(() -> {
-            if (status == null || RecordingService.STATUS_OFF.equals(status)) {
+            // Only the setting turns it off. Recording being stopped is a state worth
+            // showing, not a reason to disappear: somebody who asked to see the state asked to
+            // see all of it, and a dashcam that is silently not recording is the worst failure
+            // this app can have. An absent dot cannot be told apart from a feature nobody
+            // switched on.
+            if (status == null) {
                 if (!quietlyOff) {
                     quietlyOff = true;
-                    DevRuntimeLog.add(TAG, status == null
-                            ? "not shown: the setting is off"
-                            : "not shown: nothing is recording");
+                    DevRuntimeLog.add(TAG, "not shown: the setting is off");
                 }
                 removeNow();
                 return;
             }
             quietlyOff = false;
-            show(colourFor(status), labelFor(status));
+            show(colourFor(status), labelFor(status), isFault(status));
         });
     }
 
@@ -153,27 +156,43 @@ public final class StatusIconOverlay {
         if (RecordingService.STATUS_PAUSED_OEM.equals(status)) {
             return "360";
         }
-        if (RecordingService.STATUS_ERROR.equals(status)
-                || RecordingService.STATUS_PARTIAL.equals(status)) {
+        if (isFault(status)) {
             return "ERR";
+        }
+        if (RecordingService.STATUS_OFF.equals(status)) {
+            return "OFF";
         }
         return "REC";
     }
 
+    private static boolean isFault(@NonNull String status) {
+        return RecordingService.STATUS_ERROR.equals(status)
+                || RecordingService.STATUS_PARTIAL.equals(status);
+    }
+
+    /**
+     * Colour says how things are; the shape below says whether to care.
+     *
+     * <p>Grey belongs to OFF, which is the ordinary state of a switch somebody turned off. It
+     * used to belong to ERR as well, because ERR was the case that fell through to the end of
+     * this method - so the one state the driver must not miss was drawn in the quietest colour
+     * on the dial. Faults are amber and carry a triangle.
+     */
     private int colourFor(@NonNull String status) {
         if (RecordingService.STATUS_RECORDING.equals(status)) {
             return Color.parseColor("#E53935");
         }
         if (RecordingService.STATUS_PAUSED_OEM.equals(status)
-                || RecordingService.STATUS_STARTING.equals(status)) {
+                || RecordingService.STATUS_STARTING.equals(status)
+                || isFault(status)) {
             return Color.parseColor("#FFB300");
         }
         return Color.parseColor("#9E9E9E");
     }
 
-    private void show(int colour, @NonNull String label) {
+    private void show(int colour, @NonNull String label, boolean fault) {
         if (view != null && placedAtPercent == wantedPercent()) {
-            view.setState(colour, label);
+            view.setState(colour, label, fault);
             return;
         }
         // The dot has been moved: the window has to be laid out again, not just repainted.
@@ -183,7 +202,7 @@ public final class StatusIconOverlay {
             return;
         }
         DotView dot = new DotView(context);
-        dot.setState(colour, label);
+        dot.setState(colour, label, fault);
 
         final float density = context.getResources().getDisplayMetrics().density;
         final int barHeight = statusBarHeightPx();
@@ -306,7 +325,9 @@ public final class StatusIconOverlay {
 
         private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Path triangle = new android.graphics.Path();
         private String label = "REC";
+        private boolean fault;
 
         DotView(Context context) {
             super(context);
@@ -315,10 +336,15 @@ public final class StatusIconOverlay {
             text.setTypeface(Typeface.DEFAULT_BOLD);
         }
 
-        void setState(int colour, String label) {
+        void setState(int colour, String label, boolean fault) {
             this.dot.setColor(colour);
             this.label = label == null ? "" : label;
+            this.fault = fault;
             invalidate();
+        }
+
+        private float cy(float h) {
+            return h / 2f;
         }
 
         @Override
@@ -326,7 +352,20 @@ public final class StatusIconOverlay {
             final float h = getHeight();
             final float r = h * DOT_RADIUS;
             final float cx = h * LEFT_PAD + r;
-            canvas.drawCircle(cx, h / 2f, r, dot);
+            if (fault) {
+                // A different shape, not just a different colour. Shape survives sunlight, a
+                // glance of a quarter of a second, and whatever the driver remembers about
+                // which colour meant what.
+                final float cy = h / 2f;
+                triangle.reset();
+                triangle.moveTo(cx, cy - r * 1.2f);
+                triangle.lineTo(cx + r * 1.15f, cy + r * 0.9f);
+                triangle.lineTo(cx - r * 1.15f, cy + r * 0.9f);
+                triangle.close();
+                canvas.drawPath(triangle, dot);
+            } else {
+                canvas.drawCircle(cx, cy(h), r, dot);
+            }
 
             text.setTextSize(h * TEXT_SIZE);
             Paint.FontMetrics fm = text.getFontMetrics();

@@ -59,6 +59,8 @@ public class RecordingService extends Service {
 
     public static final String ACTION_START = "start_recording";
     public static final String ACTION_STOP = "stop_recording";
+    /** Start with nothing to record, only to keep the status indicator on screen. */
+    public static final String ACTION_SHOW_STATUS = "show_status";
     public static final String ACTION_RECORD_TEST = "record_test";
     public static final String ACTION_EJECT_USB = "eject_usb";
     public static final String ACTION_TRIGGER_EVENT_SAVE = "trigger_event_save";
@@ -725,6 +727,21 @@ public class RecordingService extends Service {
             }
         }
         String action = intent == null ? null : intent.getAction();
+
+        if (ACTION_SHOW_STATUS.equals(action)) {
+            // Asked for by the switch that turns the indicator on while nothing is recording.
+            // Without this there is nobody alive to draw OFF, and the one state worth showing
+            // would be the one state that never appears.
+            if (!UiPrefs.isStatusBarIcon(prefs())) {
+                stopServiceIfNotEjecting();
+                return START_NOT_STICKY;
+            }
+            startForeground(NOTIF_ID, buildNotification(
+                    getString(R.string.notification_recording_idle)));
+            publishStatus(prefs().getString(KEY_STATUS, STATUS_OFF), 0, TOTAL_CAMERAS,
+                    prefs().getString(KEY_LAST_ERROR, ""));
+            return START_STICKY;
+        }
 
         if (ACTION_STOP.equals(action)) {
             DevRuntimeLog.add("RecordingService", "ACTION_STOP");
@@ -2211,6 +2228,17 @@ public class RecordingService extends Service {
     public static void refreshStatusIcon(@NonNull Context context) {
         RecordingService svc = sInstance;
         if (svc == null) {
+            // Nothing of ours is running, so nothing can draw. If the indicator has just been
+            // asked for, that is a reason to start rather than to give up quietly.
+            if (UiPrefs.isStatusBarIcon(UiPrefs.getPrefs(context))) {
+                Intent i = new Intent(context, RecordingService.class);
+                i.setAction(ACTION_SHOW_STATUS);
+                try {
+                    context.startForegroundService(i);
+                } catch (Throwable t) {
+                    Log.w(TAG, "could not start the service for the indicator", t);
+                }
+            }
             return;
         }
         SharedPreferences p = svc.prefs();
@@ -2239,8 +2267,23 @@ public class RecordingService extends Service {
     /** What the last shutdown managed to finish, for the journal. */
     private volatile String lastQuiescenceDetail = "";
 
+    /**
+     * Ends the service, unless it is the only thing able to show the indicator.
+     *
+     * <p>Somebody who asked for the status to be visible asked for all of it, and OFF is a
+     * state - the one that matters most, because a dashcam that is quietly not recording looks
+     * exactly like a dashcam that is. Drawing it means staying alive with nothing to do: no
+     * cameras, no threads, a foreground notification this head unit does not even display.
+     * That is a real cost and a small one, and it is what the setting asked for.
+     */
     private void stopServiceIfNotEjecting() {
         if (usbEjectInProgress) {
+            return;
+        }
+        if (UiPrefs.isStatusBarIcon(prefs())) {
+            publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
+            startForeground(NOTIF_ID, buildNotification(
+                    getString(R.string.notification_recording_idle)));
             return;
         }
         statusIcon().hide();

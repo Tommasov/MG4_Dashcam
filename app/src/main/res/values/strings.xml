@@ -184,4 +184,5 @@
     <string name="label_status_bar_icon_adjust">Adjust its position</string>
     <string name="usage_clips_plus_current">%1$s plus the one being recorded</string>
     <string name="dashcam_error_usb_full">no room left, and no clips of ours left to remove</string>
+    <string name="notification_recording_idle">Not recording</string>
 </resources>
