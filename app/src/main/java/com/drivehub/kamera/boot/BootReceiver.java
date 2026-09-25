@@ -47,6 +47,11 @@ public class BootReceiver extends BroadcastReceiver {
 
         try {
             RecordingService.startIfDashcamEnabled(context);
+            // And if the loop is off but the indicator is on, there is still something to draw.
+            // startIfDashcamEnabled() only wakes the service for recording, so after a boot or
+            // an update the OFF state had nobody to show it: the switch looked broken until it
+            // was turned off and on again, which is how it was found.
+            RecordingService.refreshStatusIcon(context);
         } catch (Exception e) {
             Log.w(TAG, "Failed to start RecordingService", e);
         }

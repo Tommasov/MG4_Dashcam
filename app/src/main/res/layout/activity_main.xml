@@ -173,13 +173,13 @@
 
             <RadioButton
                 android:id="@+id/rbStatusIconLeft"
-                style="@style/Choice"
+                style="@style/ChoiceRadio"
                 android:layout_width="wrap_content"
                 android:text="@string/status_icon_side_left" />
 
             <RadioButton
                 android:id="@+id/rbStatusIconRight"
-                style="@style/Choice"
+                style="@style/ChoiceRadio"
                 android:layout_width="wrap_content"
                 android:text="@string/status_icon_side_right" />
         </RadioGroup>
@@ -244,17 +244,17 @@
 
                     <RadioButton
                         android:id="@+id/rbStorageInternal"
-                        style="@style/Choice"
+                        style="@style/ChoiceRadio"
                         android:text="@string/storage_target_internal" />
 
                     <RadioButton
                         android:id="@+id/rbStorageAuto"
-                        style="@style/Choice"
+                        style="@style/ChoiceRadio"
                         android:text="@string/storage_target_auto" />
 
                     <RadioButton
                         android:id="@+id/rbStorageUsb"
-                        style="@style/Choice"
+                        style="@style/ChoiceRadio"
                         android:text="@string/storage_target_usb" />
                 </RadioGroup>
 
@@ -358,14 +358,14 @@
 
                     <CheckBox
                         android:id="@+id/cbFront"
-                        style="@style/Choice"
+                        style="@style/ChoiceCheck"
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:text="@string/camera_front" />
 
                     <CheckBox
                         android:id="@+id/cbRear"
-                        style="@style/Choice"
+                        style="@style/ChoiceCheck"
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:text="@string/camera_rear" />
@@ -378,14 +378,14 @@
 
                     <CheckBox
                         android:id="@+id/cbLeft"
-                        style="@style/Choice"
+                        style="@style/ChoiceCheck"
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:text="@string/camera_left" />
 
                     <CheckBox
                         android:id="@+id/cbRight"
-                        style="@style/Choice"
+                        style="@style/ChoiceCheck"
                         android:layout_width="0dp"
                         android:layout_weight="1"
                         android:text="@string/camera_right" />

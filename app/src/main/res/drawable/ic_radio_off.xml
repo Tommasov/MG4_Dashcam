@@ -1,0 +1,14 @@
+<!-- Sized for a glance from a metre away, not for a thumb on a phone. The stock drawables are
+     about twenty dp across whatever the row height is, which on an 88dp row in a car means a
+     large target whose state cannot be read while driving. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+    <path
+        android:pathData="M18,4 A14,14 0 1,0 18,32 A14,14 0 1,0 18,4 Z"
+        android:strokeColor="#807f8a90"
+        android:strokeWidth="3"
+        android:fillColor="#00000000" />
+</vector>

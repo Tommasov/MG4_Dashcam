@@ -27,6 +27,9 @@
     <!-- The whole row is the touch target, not just the control: a thumb-sized switch is a
          poor thing to aim at from the driver's seat. -->
     <dimen name="row_height">88dp</dimen>
+    <!-- Gap between a radio or checkbox glyph and its label; the glyph width is added
+         to this by the widget itself. -->
+    <dimen name="choice_glyph_gap">16dp</dimen>
     <dimen name="row_gap">18dp</dimen>
     <dimen name="section_gap">36dp</dimen>
 

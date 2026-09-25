@@ -1,0 +1,16 @@
+<!-- Checked: the ring in the accent colour and a filled centre, so the state reads as a
+     difference in mass rather than a difference in outline weight. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+    <path
+        android:pathData="M18,4 A14,14 0 1,0 18,32 A14,14 0 1,0 18,4 Z"
+        android:strokeColor="@color/accent"
+        android:strokeWidth="3"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M18,10 A8,8 0 1,0 18,26 A8,8 0 1,0 18,10 Z"
+        android:fillColor="@color/accent" />
+</vector>

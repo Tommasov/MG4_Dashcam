@@ -47,6 +47,20 @@
 
     <!-- Switches, checkboxes and radio buttons. The row carries the height, so the finger has
          88dp to land on whatever the control itself measures. -->
+    <!-- A radio or a checkbox, with glyphs of our own. The stock ones are about twenty dp
+         across however tall the row is, which on an 88dp row in a car gives a target that is
+         easy to hit and impossible to read: the state has to be legible at a glance from the
+         driving position, and a thin ring of default grey is not. -->
+    <style name="ChoiceRadio" parent="Choice">
+        <item name="android:button">@drawable/radio_selector</item>
+        <item name="android:paddingStart">@dimen/choice_glyph_gap</item>
+    </style>
+
+    <style name="ChoiceCheck" parent="Choice">
+        <item name="android:button">@drawable/check_selector</item>
+        <item name="android:paddingStart">@dimen/choice_glyph_gap</item>
+    </style>
+
     <style name="Choice" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">@dimen/row_height</item>

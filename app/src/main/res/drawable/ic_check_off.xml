@@ -1,0 +1,13 @@
+<!-- Unchecked: an empty rounded square, same weight as the radio ring so the two families of
+     control look like they belong to the same instrument. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+    <path
+        android:pathData="M8,4 L28,4 A4,4 0 0,1 32,8 L32,28 A4,4 0 0,1 28,32 L8,32 A4,4 0 0,1 4,28 L4,8 A4,4 0 0,1 8,4 Z"
+        android:strokeColor="#807f8a90"
+        android:strokeWidth="3"
+        android:fillColor="#00000000" />
+</vector>
