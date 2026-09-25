@@ -831,8 +831,7 @@ public class RecordingService extends Service {
             if (!enabled) {
                 if (worker == null) {
                     publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
-                    stopForeground(true);
-                    stopSelf();
+                    stopServiceIfNotEjecting();
                 }
                 return START_NOT_STICKY;
             }
@@ -923,8 +922,7 @@ public class RecordingService extends Service {
         File recordsBase = resolveActiveBaseDir(true);
         if (recordsBase == null) {
             worker = null;
-            stopForeground(true);
-            stopSelf();
+            stopServiceIfNotEjecting();
             return;
         }
         // Write test clips into a separate subdirectory so they never participate
@@ -932,8 +930,7 @@ public class RecordingService extends Service {
         File testDir = new File(recordsBase, "test");
         if (!ensureDirectoryExists(testDir, "test dir")) {
             worker = null;
-            stopForeground(true);
-            stopSelf();
+            stopServiceIfNotEjecting();
             return;
         }
         boolean startedAnyCamera = recordClip(testDir, durationMs,
@@ -984,7 +981,7 @@ public class RecordingService extends Service {
         if (!enabled || segmentSec <= 0) {
             publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
             worker = null;
-            stopSelf();
+            stopServiceIfNotEjecting();
             return;
         }
 
@@ -1088,7 +1085,7 @@ public class RecordingService extends Service {
             publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
             futureOnlyEventSession = false;
             worker = null;
-            stopSelf();
+            stopServiceIfNotEjecting();
             return;
         }
 
@@ -1096,7 +1093,7 @@ public class RecordingService extends Service {
         if (baseDir == null) {
             futureOnlyEventSession = false;
             worker = null;
-            stopSelf();
+            stopServiceIfNotEjecting();
             return;
         }
 
@@ -2137,10 +2134,19 @@ public class RecordingService extends Service {
         return new SimpleDateFormat(pattern, Locale.US).format(epochMs);
     }
 
+    /**
+     * Ends the recording, then ends the service - unless something still needs drawing.
+     *
+     * <p>This used to stop the service itself: the same two lines as
+     * {@link #stopServiceIfNotEjecting()} minus the one question that matters, whether the
+     * driver asked for a permanent indicator. Turning the loop off with the switch comes
+     * through here, so the OFF state vanished at exactly the moment it was meant to appear.
+     * Two copies of the same ending is how that happens; now there is one, and every other way
+     * out of the service goes through it too.
+     */
     private void shutdownRecordingService() {
         shutdownRecordingServiceWithoutStopSelf();
-        stopForeground(true);
-        stopSelf();
+        stopServiceIfNotEjecting();
     }
 
     private void shutdownRecordingServiceWithoutStopSelf() {
