@@ -7,15 +7,16 @@ This is a stripped fork of [jamakr4/MG4-360-Camera-App](https://github.com/jamak
 whose author did the hard part: finding out how to get frames out of this vehicle's cameras at
 all. See [Relationship to upstream](#relationship-to-upstream).
 
-> **Status: it works, on one car.** An hour of continuous recording on 21 September 2026, and
-> a 33-minute stretch measured frame by frame: **54,706 frames per camera, 29.9 fps sustained,
-> not one dropped by the driver**. Six hand-offs to the factory 360 view in that session, all
-> of them resumed on their own, including one that held the screen for ninety-four seconds.
+> **Status: it works, and no longer only on one car.** An hour of continuous recording on
+> 21 September 2026, and a 33-minute stretch measured frame by frame: **54,706 frames per
+> camera, 29.9 fps sustained, not one dropped by the driver**. A second MG4, on a different
+> firmware build and belonging to somebody else, has since run it and reported back.
 >
-> That car is the author's. Nobody else's MG4 has run this, and the internal-storage target and
-> the event save still have little real mileage. Two known limits: the changeover between
-> clips costs about a second of road every thirty, and sharing a stick with music playback can
-> make the music stutter.
+> Known limits, both measured rather than guessed. The changeover between clips costs about
+> **half a second of road every thirty seconds**, and most of that is the medium rather than
+> the app: the same build on a different stick in a different car does it in 132 ms. And the
+> internal-storage target and the event save still have little real mileage - the event save
+> in particular has no trigger in the interface at all, only a broadcast.
 
 ## What it does
 
@@ -58,11 +59,12 @@ floating banners. Those are upstream's, and upstream is where they belong.
 ## What a recording looks like
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="One recorded frame: a 2x2 grid with front and rear on top, left and right below, all four in their true proportions, and a footer with the date, time and speed" width="90%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A 2x2 grid with front and rear on top, left and right below, all four in their true proportions, and a footer with the date, time and speed" width="90%">
 </p>
 
 <p align="center">
-  <em>One frame as 1.1.0 records it.</em>
+  <em>Four real camera frames, laid out by hand before the grid existed: the arrangement
+  1.1.0 now records, from pictures the cameras actually produced.</em>
 </p>
 
 A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no black. Front and
@@ -132,10 +134,36 @@ the USB stick.
   <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/status-bar.jpg" alt="The head unit's top bar in two states: an amber 360 marker while the factory around-view has the cameras, and a red REC marker while the dashcam is recording" width="90%">
 </p>
 
-Red **REC** while it is recording, amber **360** while the factory around-view has the cameras
-and the dashcam is waiting its turn, **ERR** when something needs looking at. Three letters
-rather than a bare coloured dot, because a colour has to be learned and a word does not. It does
-not blink: the middle of a dashboard is the one place that should not pull the eye.
+Five states, and the fifth is the one that matters most:
+
+| | | |
+|---|---|---|
+| **REC** | red dot | recording |
+| **360** | amber dot | the factory around-view has the cameras and the dashcam is waiting |
+| **ERR** | amber **triangle** | something needs looking at |
+| **OFF** | grey dot | not recording |
+| *nothing* | | the indicator is switched off in the settings |
+
+Three letters rather than a bare coloured dot, because a colour has to be learned and a word
+does not. It does not blink: the middle of a dashboard is the one place that should not pull
+the eye.
+
+**OFF is drawn rather than hidden.** An absent indicator cannot be told apart from a feature
+nobody switched on, and a dashcam that is quietly not recording is the worst failure this app
+can have. Showing it means the app stays alive with nothing to do while the loop is off - no
+cameras, no threads - which is what asking for a permanent indicator asks for.
+
+**A fault is a different shape, not just a different colour.** It used to be a grey dot, because
+grey was what the code fell through to, so the one state a driver must not miss was drawn in the
+quietest colour available. A triangle survives sunlight, a glance of a quarter of a second, and
+whatever anybody remembers about which colour meant what.
+
+**Where it goes.** Two choices, left or right of the climate strip, because the strip is in the
+middle of every MG4 and never moves while everything else does: the system icons grow inwards
+from the right and the now-playing text from the left. So each position hugs the centre rather
+than reaching for an edge. The two are *not* mirror images - deriving the left one by reflection
+put it on top of the temperature reading, since the strip is not symmetric about the middle -
+and a slider underneath covers the car where neither measurement holds.
 
 **Turn it on in the settings.** It ships off, and that is deliberate rather than timid - this is
 the most conspicuous thing the app does, and whether something of yours belongs inside the
@@ -215,15 +243,30 @@ around-view app wants them the dashcam has to let go - for reverse, for the stee
 button, for the indicator view at low speed. It is a race, and losing it looks like the screen
 dimming with no picture behind it.
 
+The factory app gives up after about **210 milliseconds**. That is measured, twice, and the
+two readings were 209 and 218 ms - close enough together to be a timeout in its code rather
+than luck. Miss it and the driver presses the button twice and blames the dashcam.
+
+Everything below is arranged around that number. The cameras are now free **49 ms** after the
+request, with two thirds of the budget to spare.
+
 Three things decide it:
 
 - The broadcast from the factory app is answered **in the receiver**, which raises the flags and
   interrupts the recording thread directly. Going through the service first cost service
   creation and scheduling before anything was released, which was time spent on the wrong side
   of the race.
-- A second detector watches which app is actually in front, once a second. It is slower than a
-  broadcast but catches every route into the factory camera, including any this project has not
-  mapped, and it notices when the factory app goes away without saying so.
+- A second detector watches which app is actually in front, **every 60 ms**. It is slower than
+  a broadcast but catches every route into the factory camera, including any this project has
+  not mapped, and it notices when the factory app goes away without saying so. It used to look
+  once a second, then once every 200 ms - and 200 ms of a 210 ms budget can be spent simply
+  finding out.
+- **The release does not wait for the file.** Letting a camera go used to wait for the whole
+  encoder to drain, because a combined tap answers for the shared sink, so releasing the first
+  camera waited for the last frame of the clip. The factory app wants the video devices, not
+  our MP4: the four are now detached together, in parallel, and the clip is finalised
+  afterwards on a thread nobody is waiting for. That alone took the release from about 200 ms
+  to under ten.
 - A pause never lasts more than a minute. Whatever was missed - a signal, a broadcast, a stale
   reading - a dashcam that stays paused is a dashcam that is not recording, and contending
   briefly with the factory camera is the lesser failure.
@@ -241,6 +284,17 @@ unreadable clip would otherwise take a retention slot from one that can be watch
 At 25 fps and 9 Mbit/s a clip is about **67 MB per minute, 4 GB per hour**. With the default
 10-segment buffer that is only ~340 MB on disk, so space is not the problem — continuous
 rewriting is. An hour of driving a day writes roughly 1.5 TB a year onto the head unit's eMMC.
+
+**Do not fill more than about a quarter of the medium.** The rest is what the controller uses
+to spread wear, and a dashcam is the worst case for wear: the same space is rewritten
+continuously, for ever. A card at 10 per cent used spreads the same writes over ten times the
+cells. Buy for endurance and empty space, not for speed - the app writes 1.1 MB/s, which
+nothing sold this decade struggles with.
+
+**Retention is capped by the medium, quietly.** Ask for 500 clips on a stick that holds 200 and
+nothing breaks: the volume fills, the space check makes room by removing the oldest, and the
+setting becomes *up to 500, or as many as fit*. It self-regulates at every rotation and says
+nothing, which is the right behaviour and a surprising number if you go counting.
 
 Two things worth knowing before turning the retention up:
 
