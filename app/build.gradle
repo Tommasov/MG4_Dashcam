@@ -45,7 +45,7 @@ android {
         minSdk 28
         targetSdk 36
         versionCode 89
-        versionName "1.2.0-deint.1"
+        versionName "1.2.0-deint.2"
         // Where the update manifests live, one per channel, as in the launcher.
         buildConfigField "String", "UPDATE_BASE_URL",
                 "\"https://ws2.tommasovietina.it/mg4/MG4_Dashcam/\""

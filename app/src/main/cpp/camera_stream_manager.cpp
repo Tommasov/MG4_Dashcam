@@ -234,6 +234,23 @@ namespace camera_stream_manager
             gClipStartCount++;
         }
 
+        /**
+         * How much of the picture the comb test decided against weaving.
+         *
+         * <p>The one number that says whether the threshold is sane. A few per cent on a moving
+         * scene is the shape of a working gate; near zero means it is asleep and the comb is
+         * still there, and a large fraction means it is smoothing away the detail this whole
+         * feature exists to recover.
+         */
+        long long gCombPixels = 0, gCombTotal = 0;
+
+        void countComb(long long combed, long long total)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gCombPixels += combed;
+            gCombTotal += total;
+        }
+
         /** How long the last urgent release took, in microseconds. Reported, not guessed. */
         int64_t gLastUrgentReleaseUs = 0;
 
@@ -997,6 +1014,14 @@ namespace camera_stream_manager
                 cv::Mat chromaU;
                 cv::Mat chromaV;
                 cv::Mat chroma;    // U and V interleaved, as NV12 wants them
+                // For the comb test below. Allocated once and reused: four cameras at 30 fps is
+                // no place to be asking the allocator for anything.
+                cv::Mat deltaAbove;
+                cv::Mat deltaBelow;
+                cv::Mat combAbove;
+                cv::Mat combBelow;
+                cv::Mat combMask;
+                cv::Mat interpolated;
             };
             std::array<CellStaging, 4> staging_{};
 
@@ -1331,7 +1356,17 @@ namespace camera_stream_manager
             }
 
             /**
-             * Splits the packed pairs into the two planes NV12 wants, weaving the fields.
+             * How far out of line a captured row has to be before it is called combing.
+             *
+             * <p>In luma levels. Sensor noise on these cameras is two or three even in poor
+             * light, so twelve is clear of it while still catching the edge of a passing car.
+             * Too low and genuine fine detail gets smoothed away, which is the picture this app
+             * recorded before and the one thing worth not going back to; too high and the comb
+             * stays.
+             */
+            static constexpr int COMB_THRESHOLD = 12;
+
+            /** Splits the packed pairs into the two planes NV12 wants, weaving the fields.
              *
              * <p>What arrives is one interlaced frame with its two fields stacked: rows 0..239
              * are the field captured first, rows 240..479 the one captured a fiftieth of a
@@ -1350,6 +1385,7 @@ namespace camera_stream_manager
                 if (staging.luma.rows == cellHeight_ && (cellHeight_ % 2) == 0)
                 {
                     const int fieldRows = cellHeight_ / 2;
+                    softenCombing(staging, fieldRows);
                     staging.lumaFull.create(cellHeight_, cellWidth_, CV_8UC1);
                     // Two views of the same buffer, each stepping over every other row: the
                     // first field lands on the even lines and the second on the odd ones,
@@ -1387,6 +1423,64 @@ namespace camera_stream_manager
                 cv::extractChannel(quads, staging.chromaU, 0);
                 cv::extractChannel(quads, staging.chromaV, 2);
                 cv::merge(std::vector<cv::Mat>{staging.chromaU, staging.chromaV}, staging.chroma);
+            }
+
+            /**
+             * Replaces the rows where weaving would show, and leaves the rest alone.
+             *
+             * <p>The two fields are a fiftieth of a second apart, so anything that moved between
+             * them lands in a different place on each - and interleaving that produces the comb
+             * everybody recognises. Measured on a real drive: weaving without this gave 131% more
+             * vertical detail and, in the metre of asphalt ahead of the bumper, four times the
+             * combing of the car's own bodywork. Detail that cares how fast the scene is moving
+             * is not detail.
+             *
+             * <p>The test is spatial and needs no history. A row from the second field belongs
+             * between its two neighbours from the first: genuine vertical detail sits inside that
+             * pair, a combed row falls outside <b>both</b> of them, in the same direction. Where
+             * that happens the row is replaced by the average of its neighbours - which is
+             * exactly the picture this app recorded before, so the worst case here is the old
+             * behaviour, applied only to the pixels that would have combed.
+             *
+             * <p>Cheap, and deliberately so: half a dozen passes over a cached 720x240 plane,
+             * against the 8 ms the uncached read already costs. The expensive part of this
+             * feature was paid for before we got here.
+             */
+            void softenCombing(CellStaging &staging, int fieldRows)
+            {
+                if (fieldRows < 2)
+                {
+                    return;
+                }
+                const cv::Mat fieldA = staging.luma.rowRange(0, fieldRows);
+                cv::Mat fieldB = staging.luma.rowRange(fieldRows, fieldRows * 2);
+
+                // A row of the second field sits between these two rows of the first.
+                const cv::Mat above = fieldA.rowRange(0, fieldRows - 1);
+                const cv::Mat below = fieldA.rowRange(1, fieldRows);
+                cv::Mat middle = fieldB.rowRange(0, fieldRows - 1);
+
+                cv::subtract(middle, above, staging.deltaAbove, cv::noArray(), CV_16S);
+                cv::subtract(middle, below, staging.deltaBelow, cv::noArray(), CV_16S);
+
+                // Outside both neighbours, in the same direction, by more than the threshold.
+                cv::compare(staging.deltaAbove, COMB_THRESHOLD, staging.combAbove, cv::CMP_GT);
+                cv::compare(staging.deltaBelow, COMB_THRESHOLD, staging.combBelow, cv::CMP_GT);
+                cv::bitwise_and(staging.combAbove, staging.combBelow, staging.combMask);
+
+                cv::compare(staging.deltaAbove, -COMB_THRESHOLD, staging.combAbove, cv::CMP_LT);
+                cv::compare(staging.deltaBelow, -COMB_THRESHOLD, staging.combBelow, cv::CMP_LT);
+                cv::bitwise_and(staging.combAbove, staging.combBelow, staging.combAbove);
+                cv::bitwise_or(staging.combMask, staging.combAbove, staging.combMask);
+
+                // One pixel of margin along the row: an edge caught at its centre and missed at
+                // its shoulders leaves a speckled seam, which reads worse than either choice.
+                cv::dilate(staging.combMask, staging.combMask,
+                           cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 1)));
+
+                cv::addWeighted(above, 0.5, below, 0.5, 0.0, staging.interpolated);
+                staging.interpolated.copyTo(middle, staging.combMask);
+                countComb(cv::countNonZero(staging.combMask), staging.combMask.total());
             }
 
             /**
@@ -3635,6 +3729,13 @@ namespace camera_stream_manager
                 snprintf(line, sizeof(line),
                          "preview thread: %.1fms per post, %lld posts\n",
                          gPreviewUs / 1000.0 / gPreviewCount, gPreviewCount);
+                out += line;
+            }
+            if (gCombTotal > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "deinterlacing: %.1f%% of rows interpolated rather than woven\n",
+                         100.0 * gCombPixels / gCombTotal);
                 out += line;
             }
             if (gCopyCount > 0)
