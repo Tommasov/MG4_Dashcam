@@ -126,10 +126,16 @@ public final class UiPrefs {
      * <p>The strip is in the middle of the bar on every MG4 and does not move, so these are
      * mirror images of each other about it. Which side is free depends on the car: the system
      * icons grow in from the right, the now-playing text grows in from the left, and both of
-     * those edges move while the middle does not. So each choice hugs the centre rather than
-     * reaching for an edge.
+     * those edges move while the middle does not.
+     *
+     * <p>They are not mirror images, though the geometry suggests they should be. Reflecting
+     * the right-hand value about the centre put the dot on top of the temperature reading -
+     * seen on the car - because the climate strip is not symmetric about the middle of the
+     * screen: its controls sit to the right of the temperature it starts with. So the left
+     * value is measured rather than derived, and the slider below exists for the car where
+     * this measurement turns out not to hold.
      */
-    public static final int STATUS_BAR_ICON_LEFT = 38;
+    public static final int STATUS_BAR_ICON_LEFT = 30;
     public static final int STATUS_BAR_ICON_RIGHT = 62;
 
     public static void setStatusBarIconX(SharedPreferences prefs, int percent) {

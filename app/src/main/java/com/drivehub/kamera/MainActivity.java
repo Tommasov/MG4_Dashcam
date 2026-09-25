@@ -191,6 +191,7 @@ public class MainActivity extends AppCompatActivity {
             syncing = true;
             bar.setProgress(UiPrefs.getStatusBarIconX(prefs()));
             syncing = false;
+            showStatusIconPosition(UiPrefs.getStatusBarIconX(prefs()));
             RecordingService.refreshStatusIcon(this);
         });
 
@@ -203,6 +204,7 @@ public class MainActivity extends AppCompatActivity {
 
         SeekBar dotX = findViewById(R.id.sbStatusBarIconX);
         dotX.setProgress(UiPrefs.getStatusBarIconX(prefs()));
+        showStatusIconPosition(UiPrefs.getStatusBarIconX(prefs()));
         dotX.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
@@ -212,6 +214,7 @@ public class MainActivity extends AppCompatActivity {
                 // Live, so the dot follows the finger: a position you have to guess and then
                 // check is the thing this control exists to avoid.
                 UiPrefs.setStatusBarIconX(prefs(), value);
+                showStatusIconPosition(value);
                 // Dragged by hand, so neither side is the answer any more unless it happens to
                 // land exactly on one. A radio button left lit on a position nobody chose is
                 // worse than none lit at all.
@@ -786,6 +789,21 @@ public class MainActivity extends AppCompatActivity {
      * colour of the car's own launcher, and disappears the moment it is switched on: an
      * invitation, not a nag.
      */
+    /**
+     * Puts the number on screen beside the slider.
+     *
+     * <p>Without it, somebody who finds a position that works has no way to say which one it
+     * was - not to themselves the next time, and not to anybody else. The value ends up being
+     * read out of a diagnostics report, which is a strange way to learn something the control
+     * itself could simply state.
+     */
+    private void showStatusIconPosition(int percent) {
+        TextView label = findViewById(R.id.tvStatusBarIconX);
+        if (label != null) {
+            label.setText(getString(R.string.label_status_bar_icon_position) + "  (" + percent + "%)");
+        }
+    }
+
     /** Lights the side that matches the stored position, or neither if it is between them. */
     private void syncStatusIconSide(RadioGroup group) {
         if (group == null) {
