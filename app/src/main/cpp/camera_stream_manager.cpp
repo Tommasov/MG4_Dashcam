@@ -1330,11 +1330,39 @@ namespace camera_stream_manager
                 writeCellLocked(sourceIndex, staging);
             }
 
-            /** Splits the packed pairs into the two planes NV12 wants. No lock: per camera. */
+            /**
+             * Splits the packed pairs into the two planes NV12 wants, weaving the fields.
+             *
+             * <p>What arrives is one interlaced frame with its two fields stacked: rows 0..239
+             * are the field captured first, rows 240..479 the one captured a fiftieth of a
+             * second later. Interleaving them is what recovers the full height - measured at
+             * 127% more vertical detail than stretching one of them, see docs/camera-format.md.
+             *
+             * <p>Luma only. Chroma is taken from the first field alone, exactly as before:
+             * NV12 wants one chroma row per two picture rows, so a 240-row field already fits
+             * a 480-row cell with nothing to resample, and vertical colour resolution is the
+             * least visible thing in a frame. Changing one plane at a time also means that if
+             * this looks wrong, there is one place it can be wrong in.
+             */
             void prepareCell(CellStaging &staging, int srcRows)
             {
                 cv::extractChannel(staging.packed, staging.luma, 1);
-                if (staging.luma.rows != cellHeight_)
+                if (staging.luma.rows == cellHeight_ && (cellHeight_ % 2) == 0)
+                {
+                    const int fieldRows = cellHeight_ / 2;
+                    staging.lumaFull.create(cellHeight_, cellWidth_, CV_8UC1);
+                    // Two views of the same buffer, each stepping over every other row: the
+                    // first field lands on the even lines and the second on the odd ones,
+                    // without a pass to interleave them afterwards.
+                    cv::Mat evenLines(fieldRows, cellWidth_, CV_8UC1,
+                                      staging.lumaFull.data, staging.lumaFull.step[0] * 2);
+                    cv::Mat oddLines(fieldRows, cellWidth_, CV_8UC1,
+                                     staging.lumaFull.data + staging.lumaFull.step[0],
+                                     staging.lumaFull.step[0] * 2);
+                    staging.luma.rowRange(0, fieldRows).copyTo(evenLines);
+                    staging.luma.rowRange(fieldRows, cellHeight_).copyTo(oddLines);
+                }
+                else if (staging.luma.rows != cellHeight_)
                 {
                     // A field arriving at half the cell height is stretched to fill it.
                     // Bilinear on purpose: there is no detail to recover here, and a sharper
@@ -1351,7 +1379,10 @@ namespace camera_stream_manager
                 // out as two half-width planes. NV12 wants them interleaved, one row per two
                 // picture rows - and a 240-line field stretched over 480 lines leaves exactly
                 // one source row per chroma row, so there is nothing to resample.
-                cv::Mat quads(srcRows, cellWidth_ / 2, CV_8UC4,
+                // One field's worth of chroma rows, whether one field arrived or two: NV12
+                // wants cellHeight_/2 of them, which is exactly a field.
+                const int chromaRows = std::min(srcRows, cellHeight_ / 2);
+                cv::Mat quads(chromaRows, cellWidth_ / 2, CV_8UC4,
                               staging.packed.data, staging.packed.step[0]);
                 cv::extractChannel(quads, staging.chromaU, 0);
                 cv::extractChannel(quads, staging.chromaV, 2);
@@ -2416,11 +2447,15 @@ namespace camera_stream_manager
                 // assumed. Keeping one field, which is what this app did until now, threw away
                 // 127% more vertical detail than it kept.
                 fieldHeight_ = srcHeight_ / 2;
-                // ESPERIMENTO: torna a consegnare un semiquadro, come fino alla beta.6. Serve a
-                // separare due sospetti che erano arrivati insieme nella beta.7 - il costo del
-                // deinterlacciamento e quello di una tela da 1,5 megapixel. Qui resta solo il
-                // secondo. deinterlaceLocked() e' ancora nel file, pronta a rientrare.
-                cropHeight_ = fieldHeight_;
+                // Both fields now, because the compositor weaves them. Handing over one of
+                // them was the state of things from beta.6 until here, and it threw away the
+                // half of the vertical detail that is sitting in the same buffer.
+                //
+                // The price is paid here and nowhere else: the copy out of the mapped buffer
+                // goes from 345,600 bytes to 691,200. That memory is not cached on this SoC -
+                // about 85 MB/s, measured - so the read is the whole cost of this feature and
+                // the weaving itself is almost free, happening on the cached copy afterwards.
+                cropHeight_ = srcHeight_;
 
                 {
                     char line[256];
@@ -2817,8 +2852,19 @@ namespace camera_stream_manager
 
                         if (needRgba)
                         {
-                            rgbaScratch_.create(cropHeight_, cropWidth_, CV_8UC4);
-                            cv::cvtColor(packedCrop, rgbaScratch_, rgbaConversionCode(packedFormat_));
+                            // One field for the preview, not the whole buffer. What arrives now
+                            // is two fields stacked, and converting that as if it were a picture
+                            // shows the top half of the scene above the top half of the scene
+                            // again - which looks far more broken than the combing it would be
+                            // mistaken for. The preview is a picture to glance at, not the
+                            // recording: a field stretched by the display is enough for it, and
+                            // it costs one pass instead of a weave per frame per camera.
+                            const cv::Mat previewSrc =
+                                    packedCrop.rows > fieldHeight_
+                                            ? packedCrop(cv::Rect(0, 0, cropWidth_, fieldHeight_))
+                                            : packedCrop;
+                            rgbaScratch_.create(previewSrc.rows, cropWidth_, CV_8UC4);
+                            cv::cvtColor(previewSrc, rgbaScratch_, rgbaConversionCode(packedFormat_));
                             std::lock_guard<std::mutex> lock(mutex_);
                             renderPreviewLocked(rgbaScratch_);
                         }
