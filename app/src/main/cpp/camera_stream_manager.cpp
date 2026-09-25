@@ -2769,12 +2769,28 @@ namespace camera_stream_manager
                             sinceHousekeeping = HOUSEKEEPING_EVERY;
                         }
 
+                        // One read of the descriptor, and only while it is still open.
+                        //
+                        // The thread tearing the session down closes it under mutex_ and leaves
+                        // -1 behind; this loop reads it outside that lock, so it can go away
+                        // between the exit check above and this line. select() and the ioctl
+                        // below merely fail on a closed descriptor, and the loop already treats
+                        // a failure as nothing to do. FD_SET does not fail: FORTIFY turns a
+                        // negative descriptor into abort(), which takes down the whole process
+                        // rather than the thread. On the car that is a black screen and the
+                        // service coming back - blamed on the head unit until a tombstone
+                        // named us.
+                        const int fd = fd_;
+                        if (fd < 0)
+                        {
+                            break;
+                        }
                         fd_set readSet;
                         FD_ZERO(&readSet);
-                        FD_SET(fd_, &readSet);
+                        FD_SET(fd, &readSet);
                         timeval timeout{0, PREVIEW_SELECT_TIMEOUT_US};
                         const int64_t waitStartUs = nowUs();
-                        const int ready = select(fd_ + 1, &readSet, nullptr, nullptr, &timeout);
+                        const int ready = select(fd + 1, &readSet, nullptr, nullptr, &timeout);
                         if (ready <= 0)
                         {
                             countEmptySelect(videoIndex_, nowUs() - iterationStartUs);
@@ -2786,7 +2802,7 @@ namespace camera_stream_manager
                         v4l2_buffer buffer{};
                         buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
                         buffer.memory = V4L2_MEMORY_MMAP;
-                        if (ioctl(fd_, VIDIOC_DQBUF, &buffer) < 0)
+                        if (ioctl(fd, VIDIOC_DQBUF, &buffer) < 0)
                         {
                             continue;
                         }
