@@ -5,6 +5,7 @@ import com.drivehub.kamera.R;
 import com.drivehub.kamera.CameraProbe;
 import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.dev.ProbeReport;
+import com.drivehub.kamera.update.DashcamUpdates;
 import android.os.Build;
 import androidx.annotation.NonNull;
 import com.drivehub.kamera.BuildConfig;
@@ -888,6 +889,13 @@ public class RecordingService extends Service {
             // A line per session, so the journal shows where one ends and the next begins -
             // which is also the only way to tell whether the process survived the suspend.
             journalServiceStart();
+            // Looking for a new version from here, and not only when somebody opens the app.
+            // This one is built to be left alone - the whole design is that the driver knows it
+            // is there and never touches it - so a check that only runs on an open screen is a
+            // check that never runs for the people using it properly. It is the same daily,
+            // silent check: it writes down what it found and does nothing else, and the notice
+            // is waiting the next time the app is opened for any reason.
+            DashcamUpdates.checkQuietly(this);
             // Asked for by hand, from the switch or from the boot receiver. Whatever went wrong
             // before, this is a fresh attempt and deserves its full allowance of restarts.
             prefs().edit()

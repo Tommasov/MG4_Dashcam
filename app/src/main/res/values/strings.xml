@@ -148,7 +148,7 @@
     <string name="label_status_bar_icon_summary">Draws a small dot over the factory bar: red while recording, amber while the 360 view has the cameras. The factory bar cannot take an icon from another app, so this is drawn on top of it.</string>
     <string name="label_status_bar_icon_position">Position: starts at the centre. Drag right only as far as it takes to clear the climate strip. The system icons fill the bar from the right and move as they come and go, so the nearer the centre the dot stays, the safer it is.</string>
     <string name="label_standby_diagnostics">Watch the shutdown</string>
-    <string name="label_standby_diagnostics_summary">Keeps a beat in the journal through standby and sends a report by itself at the next start. Off unless you are investigating one.</string>
+    <string name="label_standby_diagnostics_summary">Follows the shutdown second by second in the journal and sends a report by itself at the next start. For investigating, not for everyday use: it switches itself off after a week.</string>
     <string name="settings_dashcam_storage_eject_ready_message">Safe to remove the USB medium.</string>
     <string name="settings_dashcam_storage_eject_unavailable_message">No USB medium is in use.</string>
     <string name="btn_check_updates">Check for updates</string>

@@ -30,6 +30,7 @@ public final class UiPrefs {
      */
     public static final String KEY_DEV_UPDATE_BETA_CHANNEL = "devUpdateBetaChannel";
     public static final String KEY_DEV_STANDBY_DIAGNOSTICS = "devStandbyDiagnostics";
+    public static final String KEY_DEV_STANDBY_DIAGNOSTICS_SINCE = "devStandbyDiagnosticsSince";
     public static final String KEY_STATUS_BAR_ICON = "statusBarIcon";
     public static final String KEY_STATUS_BAR_ICON_X = "statusBarIconX";
     public static final String KEY_UPDATE_LAST_CHECK_MS = "updateLastCheckMs";
@@ -73,8 +74,33 @@ public final class UiPrefs {
      * the car and the processor stopping - and it is also an app that uploads on its own, which
      * this one promises not to be unless the driver says so.
      */
+    /** A week. Long enough to catch an intermittent fault, short enough to be forgotten safely. */
+    private static final long STANDBY_DIAGNOSTICS_VALID_MS = 7L * 24L * 60L * 60L * 1000L;
+
     public static boolean isStandbyDiagnostics(SharedPreferences prefs) {
-        return prefs.getBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, false);
+        if (!prefs.getBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, false)) {
+            return false;
+        }
+        long since = prefs.getLong(KEY_DEV_STANDBY_DIAGNOSTICS_SINCE, 0L);
+        long age = System.currentTimeMillis() - since;
+        if (since <= 0L || age < 0L) {
+            // Either switched on by a build that did not stamp it, or the head unit's clock has
+            // moved - which it does here, and often. Neither is a reason to switch somebody's
+            // diagnostic off behind their back: start the week from now instead.
+            prefs.edit().putLong(KEY_DEV_STANDBY_DIAGNOSTICS_SINCE, System.currentTimeMillis())
+                    .apply();
+            return true;
+        }
+        if (age > STANDBY_DIAGNOSTICS_VALID_MS) {
+            // Expires rather than waiting to be told, like every other hold in this app. An
+            // investigation that is still running after a week is one somebody will turn back
+            // on; one that finished is one nobody remembers leaving armed, uploading from a car
+            // whose owner has long since stopped thinking about it.
+            prefs.edit().putBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, false)
+                    .remove(KEY_DEV_STANDBY_DIAGNOSTICS_SINCE).apply();
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -147,7 +173,13 @@ public final class UiPrefs {
     }
 
     public static void setStandbyDiagnostics(SharedPreferences prefs, boolean on) {
-        prefs.edit().putBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, on).apply();
+        SharedPreferences.Editor e = prefs.edit().putBoolean(KEY_DEV_STANDBY_DIAGNOSTICS, on);
+        if (on) {
+            e.putLong(KEY_DEV_STANDBY_DIAGNOSTICS_SINCE, System.currentTimeMillis());
+        } else {
+            e.remove(KEY_DEV_STANDBY_DIAGNOSTICS_SINCE);
+        }
+        e.apply();
     }
 
     public static void setUpdateBetaChannel(SharedPreferences prefs, boolean beta) {

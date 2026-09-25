@@ -151,7 +151,7 @@
     <string name="label_status_bar_icon_summary">Disegna un piccolo indicatore sopra la barra di fabbrica: rosso mentre registra, ambra quando la vista 360 ha preso le telecamere. La barra di fabbrica non accetta icone da altre app, quindi viene disegnato sopra.</string>
     <string name="label_status_bar_icon_position">Posizione: parte dallo spazio libero a destra del climatizzatore. Trascina solo quanto basta: le icone di sistema riempiono la barra da destra e si spostano, quindi conviene restare vicino al centro.</string>
     <string name="label_standby_diagnostics">Osserva lo spegnimento</string>
-    <string name="label_standby_diagnostics_summary">Segue le fasi dello spegnimento secondo per secondo nel diario e manda il referto da solo alla riaccensione. Serve per indagare: tienilo spento quando non stai collaudando.</string>
+    <string name="label_standby_diagnostics_summary">Segue le fasi dello spegnimento secondo per secondo nel diario e manda il referto da solo alla riaccensione. Serve per indagare: si spegne da solo dopo una settimana.</string>
     <string name="label_beta_channel">Canale beta</string>
     <string name="label_beta_channel_summary">Propone versioni non ancora provate su strada. Lascialo spento se non stai collaudando.</string>
     <string name="update_badge">Aggiornamento: %1$s</string>
