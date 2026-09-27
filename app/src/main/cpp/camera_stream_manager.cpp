@@ -234,6 +234,41 @@ namespace camera_stream_manager
             gClipStartCount++;
         }
 
+        /**
+         * When a frame composed now should say it happened, snapped to the nominal grid.
+         *
+         * <p>The cameras deliver on a regular period, so each sample of the canvas advances the
+         * picture by one camera frame: the content moves in even steps. Stamping the moment the
+         * sample was taken instead put the scheduler's jitter into the file - measured at one
+         * interval in nine outside +-8 ms, and correlated -0.44 with the next, which is the
+         * signature of a late wake-up followed by a catch-up. Even motion shown at uneven
+         * intervals is exactly what a viewer calls stuttering, and it was visible on the road.
+         *
+         * <p>Snapping fixes it without going back to counting frames. The jitter is under half a
+         * period, so rounding erases it; a real stall is longer than half a period, so it still
+         * lands in a later slot and the file keeps the duration it actually has - which is why
+         * the real clock was chosen in the first place, and that reason still holds.
+         *
+         * <p>Never twice in the same slot: the catch-up frame carries a camera frame of its own,
+         * so it takes the next slot rather than the one just used. A repeated timestamp would
+         * also be a timestamp the muxer is entitled to refuse.
+         */
+        int64_t alignedPts(int64_t elapsedUs, int64_t frameDurationUs, int64_t lastPtsUs)
+        {
+            if (frameDurationUs <= 0)
+            {
+                return std::max<int64_t>(0, elapsedUs);
+            }
+            const int64_t clamped = std::max<int64_t>(0, elapsedUs);
+            const int64_t slot = (clamped + frameDurationUs / 2) / frameDurationUs;
+            int64_t pts = slot * frameDurationUs;
+            if (lastPtsUs >= 0 && pts <= lastPtsUs)
+            {
+                pts = lastPtsUs + frameDurationUs;
+            }
+            return pts;
+        }
+
         /** How long the last urgent release took, in microseconds. Reported, not guessed. */
         int64_t gLastUrgentReleaseUs = 0;
 
@@ -545,6 +580,7 @@ namespace camera_stream_manager
                 frameDurationUs_ = 1000000LL / std::max(1, fps_);
                 startUs_ = nowUs();
                 nextPtsUs_ = 0;
+                lastPtsUs_ = -1;
                 frameCount_ = 0;
                 logi("slot=%d /dev/video%d encoder color format=%d", slot_, videoIndex_, encoderColorFormat_);
                 return true;
@@ -618,17 +654,11 @@ namespace camera_stream_manager
                     if (inputBuffer != nullptr && inputSize >= frameSize)
                     {
                         std::memcpy(inputBuffer, encoderFrame_.data(), frameSize);
-                        // The time this frame was actually composed, not the slot it would
-                        // have had if everything ran to schedule.
-                        //
-                        // Stamping frameCount * frameDuration tells the container 25 fps
-                        // whatever arrived: all 753 timestamps in a 30-second clip came out
-                        // exactly 40 ms apart, measured. The file then claims a duration it
-                        // does not have - at 24.4 composed frames a second it plays 2.4% fast -
-                        // and the clock in the footer stops agreeing with the position in the
-                        // video. For footage somebody may have to read carefully, when a thing
-                        // happened matters more than a tidy frame rate in the header.
-                        const int64_t pts = std::max<int64_t>(0, nowUs() - startUs_);
+                        // The slot this frame belongs in, which is not the same as the moment
+                        // it happened to be composed. See alignedPts.
+                        const int64_t pts = alignedPts(nowUs() - startUs_, frameDurationUs_,
+                                                       lastPtsUs_);
+                        lastPtsUs_ = pts;
                         if (AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(inputIndex), 0, frameSize,
                                                          static_cast<uint64_t>(pts), 0) == AMEDIA_OK)
                         {
@@ -862,6 +892,7 @@ namespace camera_stream_manager
             int64_t frameDurationUs_ = 0;
             int64_t startUs_ = 0;
             int64_t nextPtsUs_ = 0;
+            int64_t lastPtsUs_ = -1;
             int64_t frameCount_ = 0;
             int encoderColorFormat_ = COLOR_FORMAT_YUV420_PLANAR;
 
@@ -1217,6 +1248,7 @@ namespace camera_stream_manager
                     frameDurationUs_ = 1000000LL / std::max(1, fps_);
                     startUs_ = nowUs();
                     nextPtsUs_ = 0;
+                    lastPtsUs_ = -1;
                     startEncoderThread();
                     logi("combined preview %dx%d", gridWidth_, totalHeight_);
                     return true;
@@ -1248,6 +1280,7 @@ namespace camera_stream_manager
                 frameDurationUs_ = 1000000LL / std::max(1, fps_);
                 startUs_ = nowUs();
                 nextPtsUs_ = 0;
+                lastPtsUs_ = -1;
                 frameCount_ = 0;
                 startEncoderThread();
                 logi("combined encoder color format=%d size=%dx%d", encoderColorFormat_, gridWidth_, totalHeight_);
@@ -1468,17 +1501,11 @@ namespace camera_stream_manager
                     if (inputBuffer != nullptr && inputSize >= frameSize)
                     {
                         std::memcpy(inputBuffer, encoderFrame_.data(), frameSize);
-                        // The time this frame was actually composed, not the slot it would
-                        // have had if everything ran to schedule.
-                        //
-                        // Stamping frameCount * frameDuration tells the container 25 fps
-                        // whatever arrived: all 753 timestamps in a 30-second clip came out
-                        // exactly 40 ms apart, measured. The file then claims a duration it
-                        // does not have - at 24.4 composed frames a second it plays 2.4% fast -
-                        // and the clock in the footer stops agreeing with the position in the
-                        // video. For footage somebody may have to read carefully, when a thing
-                        // happened matters more than a tidy frame rate in the header.
-                        const int64_t pts = std::max<int64_t>(0, nowUs() - startUs_);
+                        // The slot this frame belongs in, which is not the same as the moment
+                        // it happened to be composed. See alignedPts.
+                        const int64_t pts = alignedPts(nowUs() - startUs_, frameDurationUs_,
+                                                       lastPtsUs_);
+                        lastPtsUs_ = pts;
                         if (AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(inputIndex), 0, frameSize,
                                                          static_cast<uint64_t>(pts), 0) == AMEDIA_OK)
                         {
@@ -1924,6 +1951,7 @@ namespace camera_stream_manager
             int64_t frameDurationUs_ = 0;
             int64_t startUs_ = 0;
             int64_t nextPtsUs_ = 0;
+            int64_t lastPtsUs_ = -1;
             int64_t frameCount_ = 0;
             int encoderColorFormat_ = COLOR_FORMAT_YUV420_PLANAR;
 
