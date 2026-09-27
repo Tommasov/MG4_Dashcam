@@ -41,6 +41,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import android.widget.SeekBar;
@@ -245,6 +246,48 @@ public class MainActivity extends AppCompatActivity {
 
         bind();
         ensureStoragePermission();
+        handleIconTap(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // The tap can arrive while this screen is already up, and then onCreate never runs.
+        setIntent(intent);
+        handleIconTap(intent);
+    }
+
+    /**
+     * What a tap on the indicator in the car's own bar means.
+     *
+     * <p>Only one case needs asking: something is being recorded, and stopping that is not
+     * something a driver should manage by brushing the dashboard. Every other state - the loop
+     * already off, a fault to go and look at - is just a way into the app, so the app opens and
+     * says nothing.
+     *
+     * <p>The state is read here and now rather than carried from the overlay: between the finger
+     * going down and this line a clip can rotate or the factory 360 can take the cameras, and a
+     * question about a state that has already passed is worse than no question.
+     */
+    private void handleIconTap(@Nullable Intent intent) {
+        if (intent == null || !RecordingService.ACTION_ICON_TAPPED.equals(intent.getAction())) {
+            return;
+        }
+        // Asked once: without this, every rotation of the screen would ask it again.
+        intent.setAction(null);
+        if (RecordingService.STATUS_OFF.equals(
+                RecordingService.readPersistedStatus(prefs()).status)) {
+            return;
+        }
+        Dialogs.builder(this)
+                .setTitle(R.string.stop_recording_question)
+                .setPositiveButton(R.string.stop_recording_confirm, (d, w) ->
+                        // Through the switch, not around it: one place decides what stopping
+                        // means, and this is the same path as a finger on the toggle. A second
+                        // copy of that ending is the bug that made the OFF indicator vanish.
+                        swEnabled.setChecked(false))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     @Override

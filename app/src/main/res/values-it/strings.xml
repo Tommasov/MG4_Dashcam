@@ -186,4 +186,6 @@
     <string name="notification_recording_idle">Non sta registrando</string>
     <string name="status_icon_side_left">A sinistra del clima</string>
     <string name="status_icon_side_right">A destra del clima</string>
+    <string name="stop_recording_question">Fermare la registrazione?</string>
+    <string name="stop_recording_confirm">Ferma</string>
 </resources>

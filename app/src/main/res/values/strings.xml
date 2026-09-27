@@ -187,4 +187,6 @@
     <string name="notification_recording_idle">Not recording</string>
     <string name="status_icon_side_left">Left of the climate strip</string>
     <string name="status_icon_side_right">Right of the climate strip</string>
+    <string name="stop_recording_question">Stop recording?</string>
+    <string name="stop_recording_confirm">Stop</string>
 </resources>

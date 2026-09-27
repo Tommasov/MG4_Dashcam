@@ -62,6 +62,14 @@ public class RecordingService extends Service {
     public static final String ACTION_STOP = "stop_recording";
     /** Start with nothing to record, only to keep the status indicator on screen. */
     public static final String ACTION_SHOW_STATUS = "show_status";
+
+    /**
+     * The indicator in the car's own bar was tapped.
+     *
+     * <p>Lives here because the overlay and the activity both already depend on this class, and
+     * neither has any business depending on the other.
+     */
+    public static final String ACTION_ICON_TAPPED = "icon_tapped";
     public static final String ACTION_RECORD_TEST = "record_test";
     public static final String ACTION_EJECT_USB = "eject_usb";
     public static final String ACTION_TRIGGER_EVENT_SAVE = "trigger_event_save";
