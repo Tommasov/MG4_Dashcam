@@ -59,7 +59,7 @@ floating banners. Those are upstream's, and upstream is where they belong.
 ## What a recording looks like
 
 <p align="center">
-  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/video-frame-next.png" alt="A 2x2 grid with front and rear on top, left and right below, all four in their true proportions, and a footer with the date, time and speed" width="90%">
+  <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/mockup.png" alt="A 2x2 grid with front and rear on top, left and right below, all four in their true proportions, and a footer with the date, time and speed" width="90%">
 </p>
 
 <p align="center">
