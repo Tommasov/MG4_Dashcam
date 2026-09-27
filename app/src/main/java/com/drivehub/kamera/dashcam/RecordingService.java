@@ -1850,7 +1850,23 @@ public class RecordingService extends Service {
         }
 
         List<Map.Entry<String, Long>> groups = new ArrayList<>(groupTime.entrySet());
-        groups.sort(Comparator.comparingLong(Map.Entry::getValue));
+        // Oldest first, except that a date the car could not have known does not count as old.
+        // See DashcamStorageManager.isPlausibleClipTime: a clip written before the clock arrived
+        // is stamped 2019 and would be deleted first, although it is the newest thing here.
+        groups.sort(Comparator
+                .comparingInt((Map.Entry<String, Long> e) ->
+                        DashcamStorageManager.isPlausibleClipTime(e.getValue()) ? 0 : 1)
+                .thenComparingLong(Map.Entry::getValue));
+        int unknownDates = 0;
+        for (Map.Entry<String, Long> g : groups) {
+            if (!DashcamStorageManager.isPlausibleClipTime(g.getValue())) {
+                unknownDates++;
+            }
+        }
+        if (unknownDates > 0) {
+            DevRuntimeLog.add(TAG, unknownDates + " clip(s) with a date the car did not know;"
+                    + " held back from deletion");
+        }
 
         if (groups.size() <= keepSegments)
             return;
