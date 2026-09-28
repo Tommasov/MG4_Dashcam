@@ -165,6 +165,35 @@ than reaching for an edge. The two are *not* mirror images - deriving the left o
 put it on top of the temperature reading, since the strip is not symmetric about the middle -
 and a slider underneath covers the car where neither measurement holds.
 
+**A tap on it opens the app** - and if the dashcam is recording at that moment, the app asks
+**"Stop recording?"** before stopping anything. Any other state just opens the app, because
+there is nothing to stop.
+
+The confirmation is in the app and not in the bar on purpose, for two reasons. A command that
+cannot be taken back does not belong in the middle of a dashboard, where a hand resting on the
+screen would carry it out. And the state can change between the finger going down and the
+screen coming up - a clip rotates, the factory 360 takes the cameras - so the question is asked
+about how things are at that moment rather than how they were when the dot was tapped. The
+indicator itself carries no command at all: it reports that it was tapped, and nothing more.
+
+**Only one kind of window can do this.** Android offers three that could hold the indicator, and
+each was tried on the car:
+
+| window type | drawn above the factory bar | can receive a tap |
+|---|---|---|
+| `TYPE_SYSTEM_OVERLAY` (2006) | yes | **never** - the platform forbids it |
+| `TYPE_APPLICATION_OVERLAY` (2038) | **no** - it sits under an opaque bar, invisible | yes |
+| `TYPE_STATUS_BAR_PANEL` (2017) | **yes** | **yes** |
+
+The middle one is the trap: the window is created without complaint, sits exactly where it is
+told, and cannot be seen. The log said the overlay was showing the whole time; only the driver
+could see that it was not.
+
+**What it costs.** A window that can be tapped also keeps the gestures that land inside it, and
+this one is 124 x 80 pixels wherever you put it. If the swipe down that opens the factory tools
+drawer is started exactly on the indicator, it may not answer. Starting it a finger's width to
+one side does.
+
 **Turn it on in the settings.** It ships off, and that is deliberate rather than timid - this is
 the most conspicuous thing the app does, and whether something of yours belongs inside the
 factory interface depends on who else looks at the car.
