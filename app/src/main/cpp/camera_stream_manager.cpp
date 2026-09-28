@@ -3889,8 +3889,10 @@ namespace camera_stream_manager
             if (gComposedFrames > 0)
             {
                 const double seconds = (gComposedLastUs - gComposedFirstUs) / 1000000.0;
-                const double gridActive = (gSleepGotUs + gSnapUs + gFooterUs + gFeedUs
-                                           + gDrainUs) / 1000000.0;
+                // The wait for the cameras counts as time the loop was running: leaving it
+                // out made the rate read 35.5 fps on a loop that was composing about 30.
+                const double gridActive = (gSleepGotUs + gWaitFreshUs + gSnapUs + gFooterUs
+                                           + gFeedUs + gDrainUs) / 1000000.0;
                 snprintf(line, sizeof(line),
                          "grid: %lld composed, %.1f fps while running"
                          " (%.1f fps over %.1fs including pauses)",
