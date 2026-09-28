@@ -109,6 +109,22 @@
         <item name="android:textColor">#FFFFFF</item>
     </style>
 
+    <!-- The buttons at the bottom of a dialog. AppCompat draws them as small flat labels laid
+         out for a phone in the hand: at a metre away, behind a wheel, "OK" and "Annulla" were
+         two words a thumb had to be aimed at. The font scale in Dialogs enlarged the text around
+         them but could not enlarge what a button is made of, because that comes from a style.
+
+         Not all caps: a word in capitals is read letter by letter, which is the wrong thing to
+         ask of somebody who is glancing. -->
+    <style name="DialogButton" parent="Widget.AppCompat.Button.Borderless">
+        <item name="android:minHeight">@dimen/row_height</item>
+        <item name="android:minWidth">@dimen/dialog_button_min_width</item>
+        <item name="android:paddingStart">@dimen/dialog_button_padding_h</item>
+        <item name="android:paddingEnd">@dimen/dialog_button_padding_h</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">@dimen/dialog_button_size</item>
+    </style>
+
     <style name="Hairline" parent="">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">@dimen/hairline_height</item>
