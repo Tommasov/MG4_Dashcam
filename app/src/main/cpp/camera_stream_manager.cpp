@@ -234,6 +234,130 @@ namespace camera_stream_manager
             gClipStartCount++;
         }
 
+        /**
+         * When a frame composed now should say it happened, snapped to the nominal grid.
+         *
+         * <p>The cameras deliver on a regular period, so each sample of the canvas advances the
+         * picture by one camera frame: the content moves in even steps. Stamping the moment the
+         * sample was taken instead put the scheduler's jitter into the file - measured at one
+         * interval in nine outside +-8 ms, and correlated -0.44 with the next, which is the
+         * signature of a late wake-up followed by a catch-up. Even motion shown at uneven
+         * intervals is exactly what a viewer calls stuttering, and it was visible on the road.
+         *
+         * <p>Snapping fixes it without going back to counting frames. The jitter is under half a
+         * period, so rounding erases it; a real stall is longer than half a period, so it still
+         * lands in a later slot and the file keeps the duration it actually has - which is why
+         * the real clock was chosen in the first place, and that reason still holds.
+         *
+         * <p>Never twice in the same slot: the catch-up frame carries a camera frame of its own,
+         * so it takes the next slot rather than the one just used. A repeated timestamp would
+         * also be a timestamp the muxer is entitled to refuse.
+         */
+        int64_t alignedPts(int64_t elapsedUs, int64_t frameDurationUs, int64_t lastPtsUs)
+        {
+            if (frameDurationUs <= 0)
+            {
+                return std::max<int64_t>(0, elapsedUs);
+            }
+            const int64_t clamped = std::max<int64_t>(0, elapsedUs);
+            const int64_t slot = (clamped + frameDurationUs / 2) / frameDurationUs;
+            int64_t pts = slot * frameDurationUs;
+            if (lastPtsUs >= 0 && pts <= lastPtsUs)
+            {
+                pts = lastPtsUs + frameDurationUs;
+            }
+            return pts;
+        }
+
+        /**
+         * Whether the camera handed us the very same picture twice.
+         *
+         * <p>The question this answers is not ours to fix if the answer is yes. In poor light a
+         * sensor lengthens its integration until it can no longer produce a new picture every
+         * period, and repeats one - and the driver still delivers a buffer, so nothing in the
+         * capture loop notices. The factory 360 view shows the same hesitation in the same
+         * light, which is the observation that made this worth counting: two apps sharing only
+         * the cameras.
+         *
+         * <p>Bit-identical is the right test and it is immune to the trap that has caught every
+         * measurement made from the footage: a still scene produces frames that look alike but
+         * are never identical, because sensor noise is never the same twice.
+         */
+        long long gRepeatedBuffers = 0, gDeliveredBuffers = 0;
+
+        void countDelivery(bool repeated)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gDeliveredBuffers++;
+            if (repeated)
+            {
+                gRepeatedBuffers++;
+            }
+        }
+
+        /**
+         * Whether a snapshot of the canvas found a cell nobody had rewritten since the last one.
+         *
+         * <p>The other half of the same question. If the cameras are delivering new pictures and
+         * the canvas still holds an old cell when the encoder takes its sample, the lateness is
+         * ours - the sampler ran behind and missed a camera frame. Counted separately for the
+         * samples that land on a key frame, where the encoder does the most work and the write
+         * to the medium is the largest.
+         */
+        long long gStaleCells = 0, gStaleSamples = 0, gCanvasSamples = 0, gStaleOnKeyframe = 0;
+
+        /** How long samples spent waiting for a camera that was about to deliver. */
+        long long gWaitFreshUs = 0, gWaitFreshCount = 0;
+
+        void countWaitFresh(long long us)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gWaitFreshUs += us;
+            if (us > 0)
+            {
+                gWaitFreshCount++;
+            }
+        }
+
+        void countSnapshot(int staleCells, bool keyframe)
+        {
+            std::lock_guard<std::mutex> lock(gRateMutex);
+            gCanvasSamples++;
+            if (staleCells > 0)
+            {
+                gStaleCells += staleCells;
+                gStaleSamples++;
+                if (keyframe)
+                {
+                    gStaleOnKeyframe++;
+                }
+            }
+        }
+
+        /**
+         * A cheap stand-in for comparing two buffers byte by byte.
+         *
+         * <p>Taken from the cached copy, never from the mapped buffer, so it costs nothing worth
+         * measuring. About four thousand samples spread across the frame: enough that two
+         * genuinely different pictures agreeing on all of them is not a thing that happens.
+         */
+        uint64_t cheapFingerprint(const cv::Mat &m)
+        {
+            const size_t bytes = m.total() * m.elemSize();
+            if (m.data == nullptr || bytes == 0)
+            {
+                return 0;
+            }
+            const size_t step = std::max<size_t>(1, bytes / 4096);
+            uint64_t h = 1469598103934665603ULL;
+            for (size_t i = 0; i < bytes; i += step)
+            {
+                h ^= m.data[i];
+                h *= 1099511628211ULL;
+            }
+            return h;
+        }
+
         /** How long the last urgent release took, in microseconds. Reported, not guessed. */
         int64_t gLastUrgentReleaseUs = 0;
 
@@ -545,6 +669,7 @@ namespace camera_stream_manager
                 frameDurationUs_ = 1000000LL / std::max(1, fps_);
                 startUs_ = nowUs();
                 nextPtsUs_ = 0;
+                lastPtsUs_ = -1;
                 frameCount_ = 0;
                 logi("slot=%d /dev/video%d encoder color format=%d", slot_, videoIndex_, encoderColorFormat_);
                 return true;
@@ -618,17 +743,11 @@ namespace camera_stream_manager
                     if (inputBuffer != nullptr && inputSize >= frameSize)
                     {
                         std::memcpy(inputBuffer, encoderFrame_.data(), frameSize);
-                        // The time this frame was actually composed, not the slot it would
-                        // have had if everything ran to schedule.
-                        //
-                        // Stamping frameCount * frameDuration tells the container 25 fps
-                        // whatever arrived: all 753 timestamps in a 30-second clip came out
-                        // exactly 40 ms apart, measured. The file then claims a duration it
-                        // does not have - at 24.4 composed frames a second it plays 2.4% fast -
-                        // and the clock in the footer stops agreeing with the position in the
-                        // video. For footage somebody may have to read carefully, when a thing
-                        // happened matters more than a tidy frame rate in the header.
-                        const int64_t pts = std::max<int64_t>(0, nowUs() - startUs_);
+                        // The slot this frame belongs in, which is not the same as the moment
+                        // it happened to be composed. See alignedPts.
+                        const int64_t pts = alignedPts(nowUs() - startUs_, frameDurationUs_,
+                                                       lastPtsUs_);
+                        lastPtsUs_ = pts;
                         if (AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(inputIndex), 0, frameSize,
                                                          static_cast<uint64_t>(pts), 0) == AMEDIA_OK)
                         {
@@ -862,6 +981,7 @@ namespace camera_stream_manager
             int64_t frameDurationUs_ = 0;
             int64_t startUs_ = 0;
             int64_t nextPtsUs_ = 0;
+            int64_t lastPtsUs_ = -1;
             int64_t frameCount_ = 0;
             int encoderColorFormat_ = COLOR_FORMAT_YUV420_PLANAR;
 
@@ -997,12 +1117,15 @@ namespace camera_stream_manager
                 cv::Mat chromaU;
                 cv::Mat chromaV;
                 cv::Mat chroma;    // U and V interleaved, as NV12 wants them
+                uint64_t lastFingerprint = 0;
+                bool hasFingerprint = false;
             };
             std::array<CellStaging, 4> staging_{};
 
             CombinedRecordingSink(std::string outputPath, int cellWidth, int cellHeight, int fps, int bitrate,
-                                  std::string signature, bool showSpeed)
+                                  std::string signature, bool showSpeed, int cameraMask)
                 : outputPath_(std::move(outputPath)),
+                  cameraMask_(cameraMask),
                   cellWidth_(cellWidth),
                   cellHeight_(cellHeight),
                   gridWidth_(combinedCanvasWidth(cellWidth, cellHeight)),
@@ -1217,6 +1340,7 @@ namespace camera_stream_manager
                     frameDurationUs_ = 1000000LL / std::max(1, fps_);
                     startUs_ = nowUs();
                     nextPtsUs_ = 0;
+                    lastPtsUs_ = -1;
                     startEncoderThread();
                     logi("combined preview %dx%d", gridWidth_, totalHeight_);
                     return true;
@@ -1248,6 +1372,7 @@ namespace camera_stream_manager
                 frameDurationUs_ = 1000000LL / std::max(1, fps_);
                 startUs_ = nowUs();
                 nextPtsUs_ = 0;
+                lastPtsUs_ = -1;
                 frameCount_ = 0;
                 startEncoderThread();
                 logi("combined encoder color format=%d size=%dx%d", encoderColorFormat_, gridWidth_, totalHeight_);
@@ -1320,6 +1445,11 @@ namespace camera_stream_manager
                 packedFrame(cv::Rect(0, 0, cellWidth_, srcRows)).copyTo(staging.packed);
                 countCopyUs(nowUs() - copyStartUs);
 
+                const uint64_t fingerprint = cheapFingerprint(staging.packed);
+                countDelivery(staging.hasFingerprint && fingerprint == staging.lastFingerprint);
+                staging.lastFingerprint = fingerprint;
+                staging.hasFingerprint = true;
+
                 prepareCell(staging, srcRows);
 
                 std::lock_guard<std::mutex> lock(canvasMutex_);
@@ -1370,10 +1500,24 @@ namespace camera_stream_manager
             void snapshotCanvas(std::vector<uint8_t> &into, long long &snapUs, long long &footerUs)
             {
                 const int64_t t0 = nowUs();
+                int stale = 0;
                 {
                     std::lock_guard<std::mutex> lock(canvasMutex_);
                     std::memcpy(into.data(), nv12Canvas_.data, into.size());
+                    // Cells that nobody rewrote since the previous sample. Only the ones we are
+                    // expecting: a camera that was never selected is not late, it is absent.
+                    const int missing = cameraMask_ & cellsWrittenMask_ & ~cellsFreshMask_;
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        if (missing & (1 << i))
+                        {
+                            stale++;
+                        }
+                    }
+                    cellsFreshMask_ = 0;
                 }
+                countSnapshot(stale, frameDurationUs_ > 0
+                                     && (frameCount_ % std::max<int64_t>(1, fps_)) == 0);
                 const int64_t t1 = nowUs();
                 cv::Mat frame(totalHeight_ + (totalHeight_ / 2), gridWidth_, CV_8UC1, into.data());
                 drawFooter(frame);
@@ -1408,8 +1552,54 @@ namespace camera_stream_manager
                     } });
             }
 
+            /** How long to wait for a first picture from every camera before starting anyway. */
+            static constexpr int CANVAS_WAIT_MS = 300;
+
+            /**
+             * Waits for a canvas worth encoding, then starts the clock.
+             *
+             * <p>Without this, every clip opened with a black frame: allocateCanvas() zeroes the
+             * buffer and the encoder thread began sampling before any camera had written a cell.
+             * Measured on two clips: the first frame had a mean luminance of 1.1 against 82 ten
+             * frames later, and compressed to 8 KB against 37 - the signature of encoding
+             * nothing at all. Then the four cells appeared over one or two frames, so the clip
+             * also opened with a picture that was part black.
+             *
+             * <p>The clock is started after the wait rather than before it, so the file's first
+             * timestamp belongs to its first real picture and the duration stays honest.
+             *
+             * <p>The deadline is not a nicety. A camera that never arrives must not hold a clip
+             * open for ever; after it, this starts with whatever there is, which is the old
+             * behaviour and no worse.
+             */
+            void awaitFirstPicture()
+            {
+                const int64_t deadlineUs = nowUs() + CANVAS_WAIT_MS * 1000LL;
+                while (!stopRequested_.load() && !isFinalized())
+                {
+                    {
+                        std::lock_guard<std::mutex> lock(canvasMutex_);
+                        if ((cellsWrittenMask_ & cameraMask_) == cameraMask_)
+                        {
+                            break;
+                        }
+                    }
+                    if (nowUs() >= deadlineUs)
+                    {
+                        logw("combined starting with an incomplete canvas after %d ms",
+                             CANVAS_WAIT_MS);
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
+                startUs_ = nowUs();
+                nextPtsUs_ = 0;
+                lastPtsUs_ = -1;
+            }
+
             void encodeLoop()
             {
+                awaitFirstPicture();
                 while (!stopRequested_.load() && !isFinalized())
                 {
                     const int64_t elapsedUs = nowUs() - startUs_;
@@ -1432,8 +1622,60 @@ namespace camera_stream_manager
                 }
             }
 
+            /**
+             * Waits, briefly, for the cameras to finish the picture this sample is about to take.
+             *
+             * <p>Measured before this existed: **21.5% of samples found a cell nobody had
+             * rewritten**, 2405 cells over 8180 samples. The cause is two free-running clocks -
+             * the cameras deliver at 29.9 fps and this loop sampled at 30.3, so it gained about
+             * four tenths of a frame a second and now and then arrived before the picture did.
+             * With four cameras each on its own phase, one cell in fourteen was old, which is
+             * one sample in five.
+             *
+             * <p>A stale cell is not a lost frame - it is worse to look at than that. The
+             * quadrant holds still for one frame and then moves twice as far, which is what a
+             * driver sees as stuttering, and no amount of correct timestamps hides it because
+             * the timestamps were never wrong: the picture was.
+             *
+             * <p>So the sampler now follows the cameras instead of a wall clock. Waiting is
+             * bounded at half a period: past that, a camera is not late, it is gone - the
+             * factory 360 view has taken it, or it never arrived - and holding the whole grid
+             * for it would cost road. The pacing loop needs no changes, because a sample that
+             * waited leaves less owed to the next one, and the grid the timestamps snap to
+             * absorbs the rest.
+             */
+            int64_t awaitFreshCells(int64_t maxWaitUs)
+            {
+                if (maxWaitUs <= 0)
+                {
+                    return 0;
+                }
+                const int64_t began = nowUs();
+                const int64_t deadlineUs = began + maxWaitUs;
+                while (!stopRequested_.load() && !isFinalized())
+                {
+                    {
+                        std::lock_guard<std::mutex> lock(canvasMutex_);
+                        // Only cameras that have ever written: one that never arrived is absent,
+                        // not late, and waiting for it every frame would slow everything down.
+                        const int expected = cameraMask_ & cellsWrittenMask_;
+                        if (expected == 0 || (cellsFreshMask_ & expected) == expected)
+                        {
+                            break;
+                        }
+                    }
+                    if (nowUs() >= deadlineUs)
+                    {
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::microseconds(500));
+                }
+                return nowUs() - began;
+            }
+
             void encodeOneFrame()
             {
+                countWaitFresh(awaitFreshCells(frameDurationUs_ / 2));
                 long long snapUs = 0;
                 long long footerUs = 0;
                 snapshotCanvas(encoderFrame_, snapUs, footerUs);
@@ -1468,17 +1710,11 @@ namespace camera_stream_manager
                     if (inputBuffer != nullptr && inputSize >= frameSize)
                     {
                         std::memcpy(inputBuffer, encoderFrame_.data(), frameSize);
-                        // The time this frame was actually composed, not the slot it would
-                        // have had if everything ran to schedule.
-                        //
-                        // Stamping frameCount * frameDuration tells the container 25 fps
-                        // whatever arrived: all 753 timestamps in a 30-second clip came out
-                        // exactly 40 ms apart, measured. The file then claims a duration it
-                        // does not have - at 24.4 composed frames a second it plays 2.4% fast -
-                        // and the clock in the footer stops agreeing with the position in the
-                        // video. For footage somebody may have to read carefully, when a thing
-                        // happened matters more than a tidy frame rate in the header.
-                        const int64_t pts = std::max<int64_t>(0, nowUs() - startUs_);
+                        // The slot this frame belongs in, which is not the same as the moment
+                        // it happened to be composed. See alignedPts.
+                        const int64_t pts = alignedPts(nowUs() - startUs_, frameDurationUs_,
+                                                       lastPtsUs_);
+                        lastPtsUs_ = pts;
                         if (AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(inputIndex), 0, frameSize,
                                                          static_cast<uint64_t>(pts), 0) == AMEDIA_OK)
                         {
@@ -1681,6 +1917,11 @@ namespace camera_stream_manager
             /** All that happens under the lock: two copies into the canvas planes. */
             void writeCellLocked(int sourceIndex, const CellStaging &staging)
             {
+                if (sourceIndex >= 0 && sourceIndex < 4)
+                {
+                    cellsWrittenMask_ |= (1 << sourceIndex);
+                    cellsFreshMask_ |= (1 << sourceIndex);
+                }
                 int x = 0;
                 int y = 0;
                 cellOriginLocked(sourceIndex, x, y);
@@ -1910,6 +2151,10 @@ namespace camera_stream_manager
             }
 
             const std::string outputPath_;
+            const int cameraMask_;
+            /** Cells written at least once since this sink started, and since the last sample. */
+            int cellsWrittenMask_ = 0;
+            int cellsFreshMask_ = 0;
             const int cellWidth_;
             const int cellHeight_;
             const int gridWidth_;
@@ -1924,6 +2169,7 @@ namespace camera_stream_manager
             int64_t frameDurationUs_ = 0;
             int64_t startUs_ = 0;
             int64_t nextPtsUs_ = 0;
+            int64_t lastPtsUs_ = -1;
             int64_t frameCount_ = 0;
             int encoderColorFormat_ = COLOR_FORMAT_YUV420_PLANAR;
 
@@ -3250,7 +3496,8 @@ namespace camera_stream_manager
             fps,
             bitrate,
             signature,
-            showSpeed);
+            showSpeed,
+            normalizedMask);
         const int64_t encoderStartUs = nowUs();
         if (!sink->initialize())
         {
@@ -3335,7 +3582,7 @@ namespace camera_stream_manager
         }
         // The empty output path is what makes this a preview: see CombinedRecordingSink.
         auto sink = std::make_shared<CombinedRecordingSink>(
-            std::string(), cellWidth, cellHeight, fps, 0, signature, showSpeed);
+            std::string(), cellWidth, cellHeight, fps, 0, signature, showSpeed, normalizedMask);
         if (!sink->initialize() || !attachCombinedSinkLocked(sink, normalizedMask))
         {
             ANativeWindow_release(window);
@@ -3607,6 +3854,30 @@ namespace camera_stream_manager
                          gPreviewUs / 1000.0 / gPreviewCount, gPreviewCount);
                 out += line;
             }
+            if (gDeliveredBuffers > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "cameras handing back the same picture twice: %lld of %lld (%.2f%%)\n",
+                         gRepeatedBuffers, gDeliveredBuffers,
+                         100.0 * gRepeatedBuffers / gDeliveredBuffers);
+                out += line;
+            }
+            if (gWaitFreshCount > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "samples that waited for a camera: %lld, %.1f ms each on average\n",
+                         gWaitFreshCount, gWaitFreshUs / 1000.0 / gWaitFreshCount);
+                out += line;
+            }
+            if (gCanvasSamples > 0)
+            {
+                snprintf(line, sizeof(line),
+                         "snapshots that found a cell nobody had rewritten: %lld of %lld"
+                         " (%.2f%%), %lld cells in all, %lld of them on a key frame\n",
+                         gStaleSamples, gCanvasSamples,
+                         100.0 * gStaleSamples / gCanvasSamples, gStaleCells, gStaleOnKeyframe);
+                out += line;
+            }
             if (gCopyCount > 0)
             {
                 snprintf(line, sizeof(line),
@@ -3618,8 +3889,10 @@ namespace camera_stream_manager
             if (gComposedFrames > 0)
             {
                 const double seconds = (gComposedLastUs - gComposedFirstUs) / 1000000.0;
-                const double gridActive = (gSleepGotUs + gSnapUs + gFooterUs + gFeedUs
-                                           + gDrainUs) / 1000000.0;
+                // The wait for the cameras counts as time the loop was running: leaving it
+                // out made the rate read 35.5 fps on a loop that was composing about 30.
+                const double gridActive = (gSleepGotUs + gWaitFreshUs + gSnapUs + gFooterUs
+                                           + gFeedUs + gDrainUs) / 1000000.0;
                 snprintf(line, sizeof(line),
                          "grid: %lld composed, %.1f fps while running"
                          " (%.1f fps over %.1fs including pauses)",
