@@ -30,6 +30,12 @@
     <!-- Gap between a radio or checkbox glyph and its label; the glyph width is added
          to this by the widget itself. -->
     <dimen name="choice_glyph_gap">16dp</dimen>
+
+    <!-- Air between two choices that share a row. Without it the second one's circle begins
+         exactly where the first one's label ends, because a choice carries no padding at its
+         end: they read as one control, and worse, they are two touch targets with no border
+         between them - which is the wrong thing to hand somebody who is driving. -->
+    <dimen name="choice_row_gap">48dp</dimen>
     <dimen name="row_gap">18dp</dimen>
     <dimen name="section_gap">36dp</dimen>
 
@@ -37,6 +43,17 @@
     <dimen name="button_padding_h">24dp</dimen>
     <dimen name="button_padding_v">12dp</dimen>
     <dimen name="button_gap">16dp</dimen>
+
+    <!-- A dialog's buttons. The height is the same 88dp as every other touch target in the app:
+         a dialog is the moment a driver is deciding something, which is the worst possible
+         moment to ask for a small one.
+
+         The text is 20sp and not the 26sp of the app's own buttons because a dialog is already
+         drawn at 1.4x the system font - see Dialogs - so this lands at about 28sp on screen,
+         a shade larger than the buttons behind it, which is right for the thing being asked. -->
+    <dimen name="dialog_button_size">20sp</dimen>
+    <dimen name="dialog_button_min_width">160dp</dimen>
+    <dimen name="dialog_button_padding_h">28dp</dimen>
 
     <dimen name="field_margin_top">12dp</dimen>
     <!-- A number field wide enough for four digits. match_parent would give "5" most of a
