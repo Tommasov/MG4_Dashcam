@@ -64,7 +64,7 @@ floating banners. Those are upstream's, and upstream is where they belong.
 
 <p align="center">
   <em>Four real camera frames, laid out by hand before the grid existed: the arrangement
-  1.1.0 now records, from pictures the cameras actually produced.</em>
+  the app records today, from pictures the cameras actually produced.</em>
 </p>
 
 A 2x2 grid at 1440x1040. Every cell at its true 720x480 shape, no rotation, no black. Front and
@@ -90,25 +90,72 @@ fps per camera. How to tell a slow device from a slow reader, what else looked g
 not, and two ways of measuring a frame rate that give confidently wrong answers are in
 [docs/capture-performance.md](docs/capture-performance.md).
 
+### Smooth, eventually
+
+Motion in the finished file was uneven for a long time, in a way nobody could name: not dropped
+frames - the counters said none were ever lost - and not slow, just faintly wrong, worst at
+walking pace where the eye can follow a kerb. It took two separate causes, and both were found
+by measuring inside the app rather than by studying the footage. Six different measurements on
+the video itself had failed to separate them.
+
+**Timestamps that told the truth about the wrong thing.** Each frame was stamped with the moment
+it was composed, which depends on when the system gives the app its turn. But the cameras
+deliver on a regular beat, so the picture advances by an even step every time: even motion,
+carried by uneven timestamps, is exactly what a viewer calls stuttering. Measured on two clips: **3.7% and 6.8%** of
+intervals fell more than 8 ms out of place, and each late one was followed by an early one -
+the signature of a thread waking late and then catching up. Frames now go in the slot they
+belong to, which leaves a real stall visible while erasing the jitter. Over a 46,454-frame
+drive, **0.086%** of intervals are anything other than exact.
+
+**A compositor running on its own clock.** The cameras deliver 29.9 pictures a second; the
+compositor was sampling at 30.3. Gaining four tenths of a frame every second, it now and then
+photographed the canvas before the new picture had arrived and used the old one again - and a
+stale cell is worse to look at than a lost frame, because that quarter of the screen holds still
+for one frame and then moves twice as far. With four cameras each on its own phase it happened
+to **one sample in five**. The compositor now waits for the cameras instead, and stale cells
+fell to **4.9%**, at no cost: the waiting is paid for out of time the thread used to spend
+asleep.
+
+Both were found the same way. Two counters were added - *did the camera hand back the same
+picture twice?* and *did the sample find a cell nobody had rewritten?* - and the first report
+answered a question that weeks of looking at video had not: **0 of 32,706** for the camera, and
+21.5% for us. The fault was ours, and once named it took an afternoon.
+
 ### What it still owes
 
-**Vertical resolution.** Each cell is the top field of the interlaced buffer, 720x240, stretched
-to 720x480; the other field's lines are in the buffer and are being thrown away. Weaving them
-back was written and measured - **127% more vertical detail**, see
-[docs/camera-format.md](docs/camera-format.md) - and then parked, because doing it in software
-cost half the frame rate. The way back is the MediaTek hardware de-interlacer the factory app
-uses, which gives full-height cells and still holds 25 fps.
+**Vertical resolution.** Each cell is the top field of the interlaced buffer, 720x240,
+stretched to 720x480; the other field's lines are in the buffer and are being thrown away.
+
+Weaving them back is written, and it works. On the road it moves the ratio of vertical to
+horizontal detail from **1.39 to about 1.9** - real lines where there were invented ones - and
+it holds the frame rate: 30 fps, no frames lost, the capture loop still landing on the camera's
+own 33.4 ms. Interleaving two instants combs anything that moves, so each row is checked against
+the two around it and redrawn from their average where it falls outside both; on real drives
+that is **5 to 9% of rows**, depending on how much is moving, which leaves the rest genuinely
+woven.
+
+It is held back for a reason that has nothing to do with detail. Reading twice as much of an
+uncached buffer, plus the comb test, takes the work per camera from 8.8 ms to **19.5 ms** of a
+33.4 ms period - and the cell then reaches the canvas later than the compositor is willing to
+wait, so the stale cells described above climb back from 4.9% to **13-19%**. Deinterlacing as it
+stands trades an invisible fault for a visible one. It ships when the compositor is driven by
+the cameras delivering rather than by a clock, which makes a stale cell impossible rather than
+unlikely.
+
+The MediaTek hardware de-interlacer the factory app uses remains the other road: full-height
+cells for almost no CPU. It is a larger piece of work - V4L2 mem2mem and ION buffers - and its
+library belongs to the vehicle, so it can only ever be loaded from the device, never shipped.
 
 The stretch is bilinear rather than something sharper: a sharper filter only invents edges the
 encoder then pays for. Measured on real footage at equal quality, lanczos costs 61 per cent more
 bitrate, bicubic 57, bilinear 41.
 
-**Nearly a second a rotation.** Clips are cut every 30 seconds and the changeover is not free,
-so a little road goes unfilmed each time - about **0.9 s**, measured on real drives. Where it
-goes is no longer a guess: the app times the two halves of starting a clip and prints them.
+**About half a second a rotation.** Clips are cut every 30 seconds and the changeover is not
+free, so a little road goes unfilmed each time - **0.4 s** on average now, down from 0.9. Where
+it goes is no longer a guess: the app times the two halves of starting a clip and prints them.
 
 ```
-opening a clip: encoder and muxer 774ms, attaching the cameras 5ms (37 times)
+opening a clip: encoder and muxer 386ms, attaching the cameras 3ms (48 times)
 ```
 
 Attaching the cameras used to be a quarter of a second on its own, because stopping a clip let
@@ -127,6 +174,11 @@ wall-clock time, so a gap is always visible and dated rather than silently close
 **The bitrate stays at 9 Mbit/s**, about 58 MB a minute. It used to spend almost a fifth of
 itself on black bars; now every bit goes on picture, at the same write rate and the same load on
 the USB stick.
+
+Raising it was tried and dropped. At **15 Mbit/s** the same measure of vertical detail gives
+1.97 against 1.80 - two ranges that overlap almost entirely, so nothing that can be called a
+gain - while clips grow from 34 MB to 56, opening one goes from 386 ms to 598, and a rotation
+was seen to take a second and a half. The encoder was not the thing holding detail back.
 
 ## In the car's own status bar
 
@@ -224,6 +276,34 @@ the factory icons fill the bar **from the right** and move as they come and go, 
 climate strip in the middle has a fixed width. So the only stable gap is the one next to the
 fixed thing, and the dot should be left as close to it as looks right - every pixel further
 right is a pixel nearer the row that shifts.
+
+## Sized for the driver's seat
+
+Android sizes its controls for a phone held at arm's length. This screen is a metre away, behind
+a steering wheel, and is read in glances of about a quarter of a second. Everything here is
+sized for that instead.
+
+**The row is the target, not the control.** Every choice, switch and button is 88dp tall and
+spans the width, so the thing a thumb has to find is a band rather than a circle. The radio and
+check glyphs are drawn at 36dp rather than the stock size, because the stock ones were small
+enough to be dangerous to aim at while moving.
+
+**Two choices side by side get air between them.** Without it the second one's circle begins
+exactly where the first one's label ends: they read as one control, and they are two touch
+targets with no border between them.
+
+**Dialogs are drawn at 1.4 times the system font**, and multiply whatever the head unit is
+already set to rather than replacing it - somebody who has enlarged the car's text is asking for
+bigger text, not for ours. The whole dialog is scaled through a configuration rather than
+restyled piece by piece, because one piece cannot be restyled at all: AppCompat writes the
+message's appearance into its own layout instead of reading it from a theme, so a theme can
+reach the title and the buttons but never the paragraph in the middle - the part that most needs
+it.
+
+**Their buttons are the same 88dp, and not in capitals.** They had been left at the stock size,
+flat labels laid out for a thumb that is not holding a wheel. A word in capitals is read letter
+by letter, which is the wrong thing to ask of somebody who is glancing; nothing else in the app
+shouts either.
 
 ## Installing
 
