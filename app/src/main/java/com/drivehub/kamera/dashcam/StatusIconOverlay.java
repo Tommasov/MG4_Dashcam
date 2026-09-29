@@ -1,6 +1,7 @@
 package com.drivehub.kamera.dashcam;
 
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -11,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 
@@ -43,6 +45,20 @@ import java.lang.reflect.Method;
 public final class StatusIconOverlay {
 
     private static final String TAG = "StatusIcon";
+
+    /**
+     * Whether the indicator answers to a tap.
+     *
+     * <p>Measured on the car rather than assumed, because only one window type can do both jobs.
+     * 2006 SYSTEM_OVERLAY draws above the factory bar but can never take input. 2038
+     * APPLICATION_OVERLAY takes input but sits under the bar, which is opaque, so the window is
+     * created without complaint and is invisible. 2017 STATUS_BAR_PANEL does both, confirmed by
+     * tapping it and landing in the app.
+     *
+     * <p>The cost of being touchable is that the window swallows whatever gesture falls inside
+     * its rectangle, so the rectangle stays as small as the label needs.
+     */
+    private static final boolean TAP_OPENS_APP = true;
 
     /**
      * Everything inside the window, as fractions of the bar's own height.
@@ -209,15 +225,22 @@ public final class StatusIconOverlay {
         }
         DotView dot = new DotView(context);
         dot.setState(colour, label, fault);
+        if (TAP_OPENS_APP) {
+            attachTap(dot);
+        }
 
         final float density = context.getResources().getDisplayMetrics().density;
         final int barHeight = statusBarHeightPx();
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 windowWidthPx(barHeight),
                 barHeight,
-                WINDOW_TYPES[0],
+                typesToTry()[0],
+                // Never focusable: an indicator that takes the keyboard away from whatever the
+                // driver was doing would be a worse bug than the one it reports. Touchable only
+                // while the probe is on, because a touchable window swallows whatever gesture
+                // lands in its rectangle - including the swipe that opens the factory drawer.
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | (TAP_OPENS_APP ? 0 : WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
@@ -229,7 +252,7 @@ public final class StatusIconOverlay {
         lp.x = Math.round(MARGIN_DP * density) + Math.round(travel * placedAtPercent / 100f);
         lp.y = 0;
         StringBuilder refusals = new StringBuilder();
-        for (int type : WINDOW_TYPES) {
+        for (int type : typesToTry()) {
             lp.type = type;
             try {
                 wm.addView(dot, lp);
@@ -273,6 +296,12 @@ public final class StatusIconOverlay {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
     };
 
+    /** 2017 first when the tap matters, because it is the only type that can carry it. */
+    private static int[] typesToTry() {
+        return TAP_OPENS_APP ? new int[] {2017, 2006,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY} : WINDOW_TYPES;
+    }
+
     private static String nameOfType(int type) {
         switch (type) {
             case 2006:
@@ -282,6 +311,40 @@ public final class StatusIconOverlay {
             default:
                 return "APPLICATION_OVERLAY";
         }
+    }
+
+    /**
+     * A tap opens the app, and the app decides whether anything needs asking.
+     *
+     * <p>The overlay deliberately carries no command. A window sitting in the middle of a
+     * dashboard is the last place to put an action that cannot be taken back, and the state it
+     * would have to act on may have changed between the finger going down and the activity
+     * coming up. So it says only that it was tapped; what that means is read where there is room
+     * to show a question and an answer.
+     */
+    private void attachTap(@NonNull View dot) {
+        dot.setOnClickListener(v -> {
+            try {
+                Intent open = context.getPackageManager()
+                        .getLaunchIntentForPackage(context.getPackageName());
+                if (open == null) {
+                    DevRuntimeLog.add(TAG, "tap: no launch intent for this package");
+                    return;
+                }
+                // The component is already resolved by the launch intent, so overriding the
+                // action still lands in the same activity - and an activity already on top gets
+                // it through onNewIntent instead of being built again underneath itself.
+                open.setAction(RecordingService.ACTION_ICON_TAPPED);
+                open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                context.startActivity(open);
+                DevRuntimeLog.add(TAG, "tapped, opening the app");
+            } catch (Throwable t) {
+                DevRuntimeLog.add(TAG, "tap could not open the app: " + t);
+            }
+        });
+        dot.setClickable(true);
     }
 
     /** The bar's real height, from the framework, because guessing it would show. */

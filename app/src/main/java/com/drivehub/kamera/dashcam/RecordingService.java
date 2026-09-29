@@ -62,6 +62,14 @@ public class RecordingService extends Service {
     public static final String ACTION_STOP = "stop_recording";
     /** Start with nothing to record, only to keep the status indicator on screen. */
     public static final String ACTION_SHOW_STATUS = "show_status";
+
+    /**
+     * The indicator in the car's own bar was tapped.
+     *
+     * <p>Lives here because the overlay and the activity both already depend on this class, and
+     * neither has any business depending on the other.
+     */
+    public static final String ACTION_ICON_TAPPED = "icon_tapped";
     public static final String ACTION_RECORD_TEST = "record_test";
     public static final String ACTION_EJECT_USB = "eject_usb";
     public static final String ACTION_TRIGGER_EVENT_SAVE = "trigger_event_save";
@@ -1842,7 +1850,23 @@ public class RecordingService extends Service {
         }
 
         List<Map.Entry<String, Long>> groups = new ArrayList<>(groupTime.entrySet());
-        groups.sort(Comparator.comparingLong(Map.Entry::getValue));
+        // Oldest first, except that a date the car could not have known does not count as old.
+        // See DashcamStorageManager.isPlausibleClipTime: a clip written before the clock arrived
+        // is stamped 2019 and would be deleted first, although it is the newest thing here.
+        groups.sort(Comparator
+                .comparingInt((Map.Entry<String, Long> e) ->
+                        DashcamStorageManager.isPlausibleClipTime(e.getValue()) ? 0 : 1)
+                .thenComparingLong(Map.Entry::getValue));
+        int unknownDates = 0;
+        for (Map.Entry<String, Long> g : groups) {
+            if (!DashcamStorageManager.isPlausibleClipTime(g.getValue())) {
+                unknownDates++;
+            }
+        }
+        if (unknownDates > 0) {
+            DevRuntimeLog.add(TAG, unknownDates + " clip(s) with a date the car did not know;"
+                    + " held back from deletion");
+        }
 
         if (groups.size() <= keepSegments)
             return;

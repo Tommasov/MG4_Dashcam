@@ -16,6 +16,7 @@ import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -331,14 +332,48 @@ public final class DashcamStorageManager {
      *
      * @return the free space after trying, so the caller can decide with a number.
      */
+    /**
+     * The earliest a real recording of ours can be dated.
+     *
+     * <p>2026-01-01, which is before this app existed and after any clock this head unit falls
+     * back to. Not a guess about the future: the only thing it has to separate is "a date the
+     * car actually knew" from "the date the car uses when it does not know".
+     */
+    private static final long PLAUSIBLE_FROM_MS = 1767225600000L;
+
+    /**
+     * Whether a clip's timestamp can be believed.
+     *
+     * <p>The head unit sometimes starts recording before the clock has been set - measured on
+     * 2026-09-26, a session that began at {@code 2019-01-01 01:00:11} and ended, correctly, at
+     * {@code 22:14:34} the same evening. The footage is real; only the date is not.
+     *
+     * <p>It matters because both places that free up space delete the oldest file, by modified
+     * time. A clip stamped 2019 looks seven years old, so it goes first - and it is in fact the
+     * newest thing on the medium, filmed in the minute after a cold start, which is the minute
+     * somebody is most likely to want. An unbelievable date does not mean old, it means unknown,
+     * and for a dashcam the careful reading of unknown is recent.
+     */
+    public static boolean isPlausibleClipTime(long modifiedMs) {
+        return modifiedMs >= PLAUSIBLE_FROM_MS;
+    }
+
+    /** Oldest first, with unbelievable dates held back to the end rather than treated as old. */
+    public static final Comparator<File> OLDEST_FIRST =
+            Comparator.comparingInt((File f) -> isPlausibleClipTime(f.lastModified()) ? 0 : 1)
+                    .thenComparingLong(File::lastModified);
+
     private static long reclaimSpace(File dir, long needed, List<String> trace) {
         File[] all = dir.listFiles((d, name) -> name.toLowerCase(Locale.US).endsWith(CLIP_SUFFIX));
         if (all == null || all.length <= 1) {
             return dir.getUsableSpace();
         }
         List<File> clips = new ArrayList<>(Arrays.asList(all));
-        Collections.sort(clips, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-        clips.remove(clips.size() - 1);
+        // The file with the latest timestamp comes out of the running first, before any
+        // reordering: on a clock telling the truth that is the clip being written, and taking
+        // it by position instead would protect whatever the sort happened to leave last.
+        clips.remove(Collections.max(clips, Comparator.comparingLong(File::lastModified)));
+        Collections.sort(clips, OLDEST_FIRST);
 
         int deleted = 0;
         long free = dir.getUsableSpace();
