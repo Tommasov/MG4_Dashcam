@@ -181,6 +181,7 @@
                 android:id="@+id/rbStatusIconRight"
                 style="@style/ChoiceRadio"
                 android:layout_width="wrap_content"
+                android:layout_marginStart="@dimen/choice_row_gap"
                 android:text="@string/status_icon_side_right" />
         </RadioGroup>
 

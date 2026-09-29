@@ -30,6 +30,12 @@
     <!-- Gap between a radio or checkbox glyph and its label; the glyph width is added
          to this by the widget itself. -->
     <dimen name="choice_glyph_gap">16dp</dimen>
+
+    <!-- Air between two choices that share a row. Without it the second one's circle begins
+         exactly where the first one's label ends, because a choice carries no padding at its
+         end: they read as one control, and worse, they are two touch targets with no border
+         between them - which is the wrong thing to hand somebody who is driving. -->
+    <dimen name="choice_row_gap">48dp</dimen>
     <dimen name="row_gap">18dp</dimen>
     <dimen name="section_gap">36dp</dimen>
 
