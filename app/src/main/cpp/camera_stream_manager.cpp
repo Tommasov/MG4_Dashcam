@@ -1759,21 +1759,36 @@ namespace camera_stream_manager
                 awaitFirstPicture();
                 while (!stopRequested_.load() && !isFinalized())
                 {
-                    const int64_t elapsedUs = nowUs() - startUs_;
-                    const int64_t owedUs = nextPtsUs_ - elapsedUs;
-                    if (owedUs > 0)
+                    // Paced by the cameras, not by a clock of our own.
+                    //
+                    // This loop used to sleep to a deadline it set itself, wake, and only then
+                    // look at whether the cameras had delivered. The two rates were never the
+                    // same - the cameras give 29.9 pictures a second and the loop asked for 30 -
+                    // so it gained four tenths of a frame every second and, at the moment the
+                    // phases crossed, photographed the canvas before the new picture had landed
+                    // and used the old one again. Measured, that was one sample in five, and a
+                    // stale cell is worse to look at than a lost frame: the quadrant holds still
+                    // for a frame and then moves twice as far, which is what a driver calls
+                    // stuttering.
+                    //
+                    // Waiting a little for the late ones cut it to 5%, and deinterlacing - which
+                    // pushes the work per camera from 8.8 ms to 19.5 - put it straight back to
+                    // 19%, because the wait was capped and the cells now arrive after the cap.
+                    // Patching a race by being more patient only works until something slows
+                    // down.
+                    //
+                    // So the sleep is gone. The last camera to complete the picture wakes this
+                    // thread, and a stale cell stops being unlikely and becomes impossible: the
+                    // frame cannot be composed before the frame exists. The output rate is the
+                    // cameras' own, which is the rate the footage was always going to have.
+                    //
+                    // The cap is two frames, and it is the way out rather than the mechanism: a
+                    // camera the factory 360 view has taken is not late, it is gone, and the
+                    // other three must not be held for it.
+                    countWaitFresh(awaitFreshCells(frameDurationUs_ * 2));
                     {
-                        // One sleep to the deadline, not eight short ones. Every sleep on a
-                        // loaded system wakes late, and waking late eight times over costs
-                        // eight times as much as waking late once.
-                        {
-                            std::lock_guard<std::mutex> lock(encoderMutex_);
-                            drainEncoderLocked(0);
-                        }
-                        const int64_t beforeUs = nowUs();
-                        std::this_thread::sleep_for(std::chrono::microseconds(owedUs));
-                        countSleep(owedUs, nowUs() - beforeUs);
-                        continue;
+                        std::lock_guard<std::mutex> lock(encoderMutex_);
+                        drainEncoderLocked(0);
                     }
                     encodeOneFrame();
                 }
@@ -1811,28 +1826,30 @@ namespace camera_stream_manager
                 const int64_t deadlineUs = began + maxWaitUs;
                 while (!stopRequested_.load() && !isFinalized())
                 {
-                    {
-                        std::lock_guard<std::mutex> lock(canvasMutex_);
-                        // Only cameras that have ever written: one that never arrived is absent,
-                        // not late, and waiting for it every frame would slow everything down.
-                        const int expected = cameraMask_ & cellsWrittenMask_;
-                        if (expected == 0 || (cellsFreshMask_ & expected) == expected)
-                        {
-                            break;
-                        }
-                    }
-                    if (nowUs() >= deadlineUs)
+                    std::unique_lock<std::mutex> lock(canvasMutex_);
+                    // Only cameras that have ever written: one that never arrived is absent,
+                    // not late, and waiting for it every frame would slow everything down.
+                    const int expected = cameraMask_ & cellsWrittenMask_;
+                    if (expected != 0 && (cellsFreshMask_ & expected) == expected)
                     {
                         break;
                     }
-                    std::this_thread::sleep_for(std::chrono::microseconds(500));
+                    const int64_t leftUs = deadlineUs - nowUs();
+                    if (leftUs <= 0)
+                    {
+                        break;
+                    }
+                    // Capped rather than run to the deadline: the two conditions above this
+                    // wait are not ones a signal can carry, and a thread asleep on a camera is
+                    // a thread not noticing that it has been told to stop.
+                    canvasCv_.wait_for(lock,
+                                       std::chrono::microseconds(std::min<int64_t>(leftUs, 20000)));
                 }
                 return nowUs() - began;
             }
 
             void encodeOneFrame()
             {
-                countWaitFresh(awaitFreshCells(frameDurationUs_ / 2));
                 long long snapUs = 0;
                 long long footerUs = 0;
                 snapshotCanvas(encoderFrame_, snapUs, footerUs);
@@ -2078,6 +2095,14 @@ namespace camera_stream_manager
                 {
                     cellsWrittenMask_ |= (1 << sourceIndex);
                     cellsFreshMask_ |= (1 << sourceIndex);
+                    // The compositor sleeps until the picture is complete, so the camera that
+                    // completes it is the one that wakes it. Signalled under canvasMutex_,
+                    // which is what the sleeper holds: outside it this would race the check.
+                    const int expected = cameraMask_ & cellsWrittenMask_;
+                    if (expected != 0 && (cellsFreshMask_ & expected) == expected)
+                    {
+                        canvasCv_.notify_one();
+                    }
                 }
                 int x = 0;
                 int y = 0;
@@ -2352,6 +2377,8 @@ namespace camera_stream_manager
             std::mutex encoderMutex_;
             /** Guards the canvas: four camera threads write it, the encoder thread copies it. */
             std::mutex canvasMutex_;
+            /** Raised when the last cell a frame was waiting for has been written. */
+            std::condition_variable canvasCv_;
             /** Guards the preview surface, which outlives neither of the other two. */
             std::mutex previewMutex_;
             std::thread encoderThread_;
