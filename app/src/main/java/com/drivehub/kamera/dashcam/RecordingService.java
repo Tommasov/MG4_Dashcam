@@ -720,7 +720,7 @@ public class RecordingService extends Service {
             sp.edit().putInt(KEY_STICKY_RESTARTS, sp.getInt(KEY_STICKY_RESTARTS, 0) + 1).apply();
             if (!prefs().getBoolean(DashcamSettings.KEY_ENABLED, false)) {
                 publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
-                stopSelf();
+                stopServiceIfNotEjecting();
                 return START_NOT_STICKY;
             }
             if (crashLoopDetected()) {
@@ -730,8 +730,7 @@ public class RecordingService extends Service {
                 // driver is left with a head unit that will not sit still.
                 prefs().edit().putBoolean(DashcamSettings.KEY_ENABLED, false).apply();
                 publishStatus(STATUS_ERROR, 0, TOTAL_CAMERAS, ERROR_CRASH_LOOP);
-                stopForeground(true);
-                stopSelf();
+                stopServiceIfNotEjecting();
                 return START_NOT_STICKY;
             }
         }
@@ -772,8 +771,7 @@ public class RecordingService extends Service {
                     usbEjectInProgress = false;
                     broadcastUsbEjectReady(
                             false, R.string.settings_dashcam_storage_eject_unavailable_message);
-                    stopForeground(true);
-                    stopSelf();
+                    stopServiceIfNotEjecting();
                     return;
                 }
                 boolean safeToRemove = awaitShutdownQuiescence();
@@ -782,8 +780,18 @@ public class RecordingService extends Service {
                         safeToRemove
                                 ? R.string.settings_dashcam_storage_eject_ready_message
                                 : R.string.settings_dashcam_storage_eject_unavailable_message);
-                stopForeground(true);
-                stopSelf();
+                // The flag is lowered before the ending runs, not after: it exists to stop the
+                // ordinary shutdown from taking the service down *during* an eject, and the
+                // eject is over. Lowered, the one ending in this class applies - and if the
+                // driver asked for a permanent indicator, the service stays alive showing OFF
+                // instead of disappearing with the stick.
+                //
+                // This path had its own stopForeground/stopSelf, which is the second copy of an
+                // ending that this class has already paid for once: the same two lines, written
+                // twice, are what made the OFF indicator vanish when the loop was switched off.
+                // It vanished again here, for the same reason, in the same way.
+                usbEjectInProgress = false;
+                stopServiceIfNotEjecting();
             }, "RecordingServiceUsbEject").start();
             return START_NOT_STICKY;
         }
@@ -867,8 +875,7 @@ public class RecordingService extends Service {
                     DashcamNotice.showFutureOnlyConfirmation(this);
                 } else if (allowFutureOnly) {
                     startForeground(NOTIF_ID, buildNotification(""));
-                    stopForeground(true);
-                    stopSelf();
+                    stopServiceIfNotEjecting();
                 }
                 return allowFutureOnly ? START_NOT_STICKY : START_STICKY;
             }
@@ -2319,7 +2326,14 @@ public class RecordingService extends Service {
             return;
         }
         if (UiPrefs.isStatusBarIcon(prefs())) {
-            publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
+            // OFF, unless what is on screen is a fault. A caller that has just published ERROR
+            // is ending the service *because* of it, and overwriting that with OFF would erase
+            // the one state the driver must not miss - showing the triangle for an instant and
+            // then a grey dot that says everything is merely switched off.
+            String current = readPersistedStatus(prefs()).status;
+            if (!STATUS_ERROR.equals(current) && !STATUS_PARTIAL.equals(current)) {
+                publishStatus(STATUS_OFF, 0, TOTAL_CAMERAS, "");
+            }
             startForeground(NOTIF_ID, buildNotification(
                     getString(R.string.notification_recording_idle)));
             return;
