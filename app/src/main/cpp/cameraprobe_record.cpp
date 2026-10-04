@@ -1,4 +1,6 @@
 #include <jni.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <android/log.h>
 
@@ -70,6 +72,45 @@ Java_com_drivehub_kamera_CameraProbe_startMp4Record(JNIEnv* env, jclass /*clazz*
                 static_cast<int>(bitrate)
         );
     }) ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Pushes everything this filesystem is still holding in memory onto the medium.
+ *
+ * <p>Deleting a file on FAT is two writes - the directory entry freed, and the chain of clusters
+ * released in the allocation table - and nothing forces either of them anywhere. They wait in
+ * the kernel's cache until it chooses to write them, which in a car is until the ignition is
+ * switched off. What is left behind is a table that still says those clusters are in use and a
+ * directory that no longer mentions them, so the next mount finds clusters with no owner and
+ * files them under LOST.DIR: a little more on every drive, until the medium is full of the
+ * recordings it was told to delete.
+ *
+ * <p>syncfs() rather than fsync() on the directory. The second would probably do - the kernel's
+ * vfat code flushes the allocation table alongside a directory - but "probably" is a poor thing
+ * to put between somebody's dashcam and a full stick, and this costs the same.
+ *
+ * <p>Scoped to the one filesystem the descriptor belongs to, so a slow USB stick cannot drag
+ * the head unit's own storage into the wait.
+ */
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_drivehub_kamera_CameraProbe_syncFilesystem(JNIEnv* env, jclass /*clazz*/,
+                                                    jstring path) {
+    if (path == nullptr) {
+        return JNI_FALSE;
+    }
+    const char* chars = env->GetStringUTFChars(path, nullptr);
+    if (chars == nullptr) {
+        return JNI_FALSE;
+    }
+    const int fd = open(chars, O_RDONLY | O_CLOEXEC);
+    env->ReleaseStringUTFChars(path, chars);
+    if (fd < 0) {
+        return JNI_FALSE;
+    }
+    const int result = syncfs(fd);
+    close(fd);
+    return result == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C"

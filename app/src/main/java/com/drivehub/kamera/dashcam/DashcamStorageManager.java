@@ -1,5 +1,7 @@
 package com.drivehub.kamera.dashcam;
 
+import com.drivehub.kamera.CameraProbe;
+import com.drivehub.kamera.dev.DevRuntimeLog;
 import com.drivehub.kamera.settings.UiPrefs;
 
 import androidx.annotation.NonNull;
@@ -97,6 +99,41 @@ public final class DashcamStorageManager {
         NOT_ENOUGH_SPACE,   // writable, but not enough room for a clip and a margin
         MULTIPLE_MEDIA,     // more than one usable medium and no choice made — see setPreferredVolumeId
         CHOSEN_VOLUME_ABSENT // a volume was chosen by hand and it is not connected
+    }
+
+    /**
+     * Pushes a directory's metadata onto the medium, and on FAT the allocation table with it.
+     *
+     * <p>Deleting a file on FAT is two writes - the directory entry freed, and the chain of
+     * clusters released in the table - and neither is forced anywhere. They sit in the kernel's
+     * cache until it feels like writing them, which on a car is until the ignition is switched
+     * off. What survives is a table that still says those clusters are in use and a directory
+     * that no longer mentions them, so the next mount finds clusters with no owner and files
+     * them under LOST.DIR. A little more every time, until the medium is full of its own
+     * deleted recordings.
+     *
+     * <p>Clips written are already fsynced, which is why this went unseen for months: the fault
+     * only appears once the ring buffer is full and every rotation deletes something. On this
+     * car that was the day the stick filled up.
+     *
+     * <p>fsync on a vfat directory is enough - the kernel's implementation flushes the
+     * allocation table alongside it - so no native call is needed.
+     */
+    static void syncDirectory(File dir, String why) {
+        if (dir == null) {
+            return;
+        }
+        try {
+            if (!CameraProbe.syncFilesystem(dir.getAbsolutePath())) {
+                DevRuntimeLog.add(TAG, "sync of " + dir.getAbsolutePath()
+                        + " after " + why + " did not succeed");
+            }
+        } catch (Throwable t) {
+            // Worth a line and nothing more: a medium that will not sync has larger problems,
+            // and whatever writes to it next will say so.
+            DevRuntimeLog.add(TAG, "could not sync " + dir.getAbsolutePath()
+                    + " after " + why + ": " + t);
+        }
     }
 
     /** Immutable outcome of one storage resolution pass. */
@@ -310,6 +347,9 @@ public final class DashcamStorageManager {
                 deleted++;
             }
         }
+        if (deleted > 0) {
+            syncDirectory(base, "clearing the folder");
+        }
         return deleted;
     }
 
@@ -387,6 +427,7 @@ public final class DashcamStorageManager {
             free = dir.getUsableSpace();
         }
         if (deleted > 0) {
+            syncDirectory(dir, "making room");
             trace(trace, "made room in " + dir.getAbsolutePath() + ": removed " + deleted
                     + " old clip(s), now " + (free / 1048576) + " MB free");
         }

@@ -1899,6 +1899,18 @@ public class RecordingService extends Service {
             }
             deleted++;
         }
+        if (deleted > 0) {
+            // Nothing else forces a deletion onto the medium, and the ignition does not wait.
+            // See DashcamStorageManager.syncDirectory: without this, every rotation that frees
+            // a clip leaves the allocation table and the directory disagreeing, and the next
+            // mount files the difference under LOST.DIR until the stick is full of recordings
+            // it was told to throw away.
+            //
+            // Here rather than once at shutdown: the ignition can be cut at any moment, and a
+            // sync that only runs when the car is switched off is a sync that runs after the
+            // thing it was meant to prevent.
+            DashcamStorageManager.syncDirectory(baseDir, "retention");
+        }
     }
 
     private void trimOldEventDirsLocked(File eventsBaseDir) {

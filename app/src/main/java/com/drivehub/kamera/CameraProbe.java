@@ -53,6 +53,15 @@ public final class CameraProbe {
      * Starts MP4 recording from a specific /dev/videoX device.
      * slot: 0..3 to allow multiple concurrent recorders.
      */
+    /**
+     * Forces the filesystem the given path lives on to write out what it is still holding.
+     *
+     * <p>For deletions, which nothing else forces: see the comment on the native side. Returns
+     * false if the path cannot be opened or the sync fails, and the caller is expected to carry
+     * on - a medium that will not sync has larger problems than this call can fix.
+     */
+    public static native boolean syncFilesystem(String path);
+
     public static native boolean startMp4Record(int slot, int videoIndex, String outputPath,
             int width, int height, int fps, int bitrate);
 
