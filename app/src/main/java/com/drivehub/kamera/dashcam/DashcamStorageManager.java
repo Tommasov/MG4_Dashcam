@@ -732,6 +732,30 @@ public final class DashcamStorageManager {
                 // lands in the report - EROFS for a mount that came up read-only, EACCES for a
                 // permission problem - which are different faults that used to arrive as the
                 // same line.
+                // Room first, and the probe second. They used to be the other way round, and
+                // on a medium with nothing left the order decided the diagnosis: the probe
+                // writes a file, a full volume cannot take one, and the app reported "not
+                // writable" - a permission fault - for a stick that was merely full. Worse, it
+                // reported it instead of ever reaching the line below that would have made
+                // room, so the one thing that could have fixed it never ran.
+                //
+                // Full is not a reason to give up before trying the one thing that helps. The
+                // loop is otherwise closed: no room means no clip, no clip means no segment
+                // completes, and retention only ever runs when one does - so the app would wait
+                // for ever for space that it is the only thing able to release.
+                long needed = bytesNeeded(context);
+                if (recordsDir.getUsableSpace() < needed) {
+                    long after = reclaimSpace(recordsDir, needed, trace);
+                    if (after < needed) {
+                        anyOutOfSpace = true;
+                        trace(trace, "no: not enough room in " + recordsDir.getAbsolutePath()
+                                + " [" + where.what + "]: " + (after / 1048576)
+                                + " MB free, " + (needed / 1048576) + " MB needed for "
+                                + REQUIRED_CLIPS_OF_ROOM + " clips");
+                        continue;
+                    }
+                }
+
                 boolean advisoryWritable = recordsDir.canWrite();
                 String probeError = writeProbeError(recordsDir);
                 if (probeError != null) {
@@ -745,24 +769,6 @@ public final class DashcamStorageManager {
                 if (!advisoryWritable) {
                     trace(trace, "note: canWrite() said no but the write probe succeeded in "
                             + recordsDir.getAbsolutePath() + " [" + where.what + "]");
-                }
-
-                long needed = bytesNeeded(context);
-                long free = recordsDir.getUsableSpace();
-                if (free < needed) {
-                    // Full is not a reason to give up before trying the one thing that helps.
-                    // The loop is otherwise closed: no room means no clip, no clip means no
-                    // segment completes, and retention only ever runs when one does - so the
-                    // app waits forever for space that it is the only thing able to release.
-                    long after = reclaimSpace(recordsDir, needed, trace);
-                    if (after < needed) {
-                        anyOutOfSpace = true;
-                        trace(trace, "no: not enough room in " + recordsDir.getAbsolutePath()
-                                + " [" + where.what + "]: " + (after / 1048576)
-                                + " MB free, " + (needed / 1048576) + " MB needed for "
-                                + REQUIRED_CLIPS_OF_ROOM + " clips");
-                        continue;
-                    }
                 }
                 accepted = recordsDir;
                 acceptedWhat = where.what;

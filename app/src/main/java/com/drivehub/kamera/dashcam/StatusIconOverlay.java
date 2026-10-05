@@ -83,7 +83,7 @@ public final class StatusIconOverlay {
      * changing state repaints in place instead of shuffling the dot sideways along the bar -
      * movement in the corner of the eye being the one thing a dashboard should not add.
      */
-    private static final String[] LABELS = {"REC", "360", "ERR"};
+    private static final String[] LABELS = {"REC", "360", "ERR", "OFF", "..."};
 
     /** Measured, not assumed: three bold capitals are wider than they look. */
     private static int windowWidthPx(int barHeightPx) {
@@ -178,6 +178,18 @@ public final class StatusIconOverlay {
         }
         if (RecordingService.STATUS_OFF.equals(status)) {
             return "OFF";
+        }
+        if (RecordingService.STATUS_STARTING.equals(status)) {
+            // Not REC, which is what this state used to be drawn as - amber, but with the word
+            // that means the opposite of what was happening. Starting can last a second at an
+            // ordinary ignition, and up to two and a half minutes while the app waits for a
+            // medium that is slow, missing or full: all that time the indicator said the
+            // recording was running. A driver who glances at REC has been told the one thing
+            // this app exists to be honest about, and been told it wrongly.
+            //
+            // Three dots rather than a word: the app is read in English and Italian, and this
+            // is the one state where the message is "wait" in both.
+            return "...";
         }
         return "REC";
     }
