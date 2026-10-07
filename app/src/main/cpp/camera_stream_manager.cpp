@@ -1790,6 +1790,28 @@ namespace camera_stream_manager
                         std::lock_guard<std::mutex> lock(encoderMutex_);
                         drainEncoderLocked(0);
                     }
+                    // And then, if the requested rate is slower than the cameras, hold.
+                    //
+                    // Waiting for a complete picture fixes *which* picture gets encoded; it
+                    // says nothing about how often. Without this the loop ran at whatever the
+                    // cameras delivered, and the timestamps - still spaced by the rate the
+                    // driver asked for - stretched to cover it: at the default 25 against
+                    // cameras giving 29.9, a thirty-second clip claimed thirty-six and played
+                    // a fifth slow. The author's car never showed it because it had been set
+                    // to 30, where the two rates agree.
+                    //
+                    // Sleeping here rather than dropping the picture: by the time the slot
+                    // comes round the cameras have usually delivered another complete one, so
+                    // what gets encoded is the newest picture rather than the one that happened
+                    // to arrive first - and it is still complete, which is the property the
+                    // wait above exists to guarantee.
+                    const int64_t owedUs = nextPtsUs_ - (nowUs() - startUs_);
+                    if (owedUs > 0)
+                    {
+                        const int64_t beforeUs = nowUs();
+                        std::this_thread::sleep_for(std::chrono::microseconds(owedUs));
+                        countSleep(owedUs, nowUs() - beforeUs);
+                    }
                     encodeOneFrame();
                 }
             }

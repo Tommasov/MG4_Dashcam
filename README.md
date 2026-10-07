@@ -112,9 +112,16 @@ compositor was sampling at 30.3. Gaining four tenths of a frame every second, it
 photographed the canvas before the new picture had arrived and used the old one again - and a
 stale cell is worse to look at than a lost frame, because that quarter of the screen holds still
 for one frame and then moves twice as far. With four cameras each on its own phase it happened
-to **one sample in five**. The compositor now waits for the cameras instead, and stale cells
-fell to **4.9%**, at no cost: the waiting is paid for out of time the thread used to spend
-asleep.
+to **one sample in five**.
+
+Waiting a little for the late ones brought that to 4.9%, and it was the wrong fix: a race
+patched with patience holds until something slows down, and deinterlacing - which takes the work
+per camera from 8.8 ms to 19.5 - put it straight back to 19%. So the clock went. The last camera
+to complete the picture now wakes the compositor, which makes a stale cell not unlikely but
+**impossible**: a frame cannot be composed before the frame exists, and the output rate becomes
+the cameras' own, which is the rate the footage was always going to have. Measured on the road
+with deinterlacing on: **0.16%**, and no frames lost in 140,844 deliveries. The waiting costs
+nothing - it is paid for out of time the thread used to spend asleep.
 
 Both were found the same way. Two counters were added - *did the camera hand back the same
 picture twice?* and *did the sample find a cell nobody had rewritten?* - and the first report
@@ -123,30 +130,36 @@ answered a question that weeks of looking at video had not: **0 of 32,706** for 
 
 ### What it still owes
 
-**Vertical resolution.** Each cell is the top field of the interlaced buffer, 720x240,
-stretched to 720x480; the other field's lines are in the buffer and are being thrown away.
+**Vertical resolution** was the oldest debt here, and 1.4.0 pays it. Each cell used to be the
+top field of the interlaced buffer, 720x240 stretched to 720x480, with the other field's lines
+sitting unread in the same buffer.
 
-Weaving them back is written, and it works. On the road it moves the ratio of vertical to
-horizontal detail from **1.39 to about 1.9** - real lines where there were invented ones - and
-it holds the frame rate: 30 fps, no frames lost, the capture loop still landing on the camera's
-own 33.4 ms. Interleaving two instants combs anything that moves, so each row is checked against
-the two around it and redrawn from their average where it falls outside both; on real drives
-that is **5 to 9% of rows**, depending on how much is moving, which leaves the rest genuinely
-woven.
+They are now woven back. On the road that moves the ratio of vertical to horizontal detail from
+**1.39 to about 1.9** - real lines where there were invented ones - and it holds the frame rate:
+30 fps, nothing lost, the capture loop still landing on the camera's own 33.4 ms. Interleaving
+two instants combs anything that moves, so each row is checked against the two around it and
+redrawn from their average where it falls outside both; on real drives that is **5 to 9% of
+rows**, depending on how much is moving, which leaves the rest genuinely woven. The worst case
+is therefore the old picture, applied only to the pixels that would have combed.
 
-It is held back for a reason that has nothing to do with detail. Reading twice as much of an
-uncached buffer, plus the comb test, takes the work per camera from 8.8 ms to **19.5 ms** of a
-33.4 ms period - and the cell then reaches the canvas later than the compositor is willing to
-wait, so the stale cells described above climb back from 4.9% to **13-19%**. Deinterlacing as it
-stands trades an invisible fault for a visible one. It ships when the compositor is driven by
-the cameras delivering rather than by a clock, which makes a stale cell impossible rather than
-unlikely.
+It costs. Reading twice as much of an uncached buffer, plus the comb test, takes the work per
+camera from 8.8 ms to **19.5 ms** of a 33.4 ms period - from a quarter of each capture thread to
+rather more than half. It could not ship until the compositor stopped running on its own clock,
+because the cells now arrive later than the old one was willing to wait for: it traded an
+invisible fault for a visible one until that was fixed.
 
-The MediaTek hardware de-interlacer the factory app uses remains the other road: full-height
-cells for almost no CPU. It is a larger piece of work - V4L2 mem2mem and ION buffers - and its
-library belongs to the vehicle, so it can only ever be loaded from the device, never shipped.
+The MediaTek hardware de-interlacer the factory app uses remains the other road, and would give
+the same result for almost no CPU. It is a larger piece of work - V4L2 mem2mem and ION buffers -
+and its library belongs to the vehicle, so it could only ever be loaded from the device, never
+shipped.
 
-The stretch is bilinear rather than something sharper: a sharper filter only invents edges the
+Chroma still comes from one field. NV12 wants one chroma row per two picture rows, so a 240-row
+field already fits a 480-row cell with nothing to resample, and vertical colour resolution is
+the least visible thing in a frame. Changing one plane at a time also means that if this looks
+wrong there is one place it can be wrong in.
+
+Where a field is still stretched - the preview, and any cell that arrives at half height - the
+stretch is bilinear rather than something sharper: a sharper filter only invents edges the
 encoder then pays for. Measured on real footage at equal quality, lanczos costs 61 per cent more
 bitrate, bicubic 57, bilinear 41.
 
@@ -186,15 +199,23 @@ was seen to take a second and a half. The encoder was not the thing holding deta
   <img src="https://ws2.tommasovietina.it/mg4/MG4_Dashcam/status-bar.jpg" alt="The head unit's top bar in two states: an amber 360 marker while the factory around-view has the cameras, and a red REC marker while the dashcam is recording" width="90%">
 </p>
 
-Five states, and the fifth is the one that matters most:
+Six states, and the ones that are not **REC** matter more than it does:
 
 | | | |
 |---|---|---|
 | **REC** | red dot | recording |
 | **360** | amber dot | the factory around-view has the cameras and the dashcam is waiting |
+| **...** | amber dot | starting, or waiting for a medium that is slow, missing or full |
 | **ERR** | amber **triangle** | something needs looking at |
 | **OFF** | grey dot | not recording |
 | *nothing* | | the indicator is switched off in the settings |
+
+**The dots were drawn as REC until 1.4.0**, which is the worst thing this indicator could say.
+Starting lasts a second at an ordinary ignition, but up to two and a half minutes while the app
+waits for a stick that is slow to mount or has nothing left on it - and for all that time the
+driver was being told the recording was running. The one state this app exists to be honest
+about, reported wrongly. Three dots rather than a word because the app is read in English and in
+Italian, and this is the state where the message is "wait" in both.
 
 Three letters rather than a bare coloured dot, because a colour has to be learned and a word
 does not. It does not blink: the middle of a dashboard is the one place that should not pull
@@ -445,6 +466,32 @@ any of this from inside the car.
 
 Use **Stop and eject USB** before pulling the stick: it stops the loop and waits for the
 pending writes instead of truncating the clip in flight.
+
+**Deleting is a write too, and it took a year to notice.** The clips this app writes were always
+fsynced; the ones it *deletes* were not, and on FAT deleting a file is two writes of its own -
+the directory entry freed, and the chain of clusters released in the allocation table. Neither
+is forced anywhere. They wait in the kernel's cache until it chooses to write them, which in a
+car is until the ignition is switched off.
+
+What survives is a table that still says those clusters are in use and a directory that no
+longer mentions them. The next mount finds clusters with no owner and files them under
+**LOST.DIR** - a little more on every drive, until the stick is full of the recordings it was
+told to throw away. On the author's car it reached the point of filling a 32 GB stick, and the
+app could do nothing about it: it measures free space on the whole volume but can only delete
+inside its own folder.
+
+It stayed invisible for as long as it did because it needs the ring buffer to be full. Until the
+stick fills up nothing is ever deleted, so there is nothing to leave half-finished. The day the
+retention starts deleting at every rotation is the day it begins.
+
+Every deletion is now pushed to the medium before anything else happens - `syncfs` on that one
+filesystem, so a slow stick cannot drag the head unit's own storage into the wait. At each
+deletion rather than once at shutdown: the ignition is cut whenever the driver feels like it,
+and a flush that only runs when the car is switched off is a flush that runs after the thing it
+was meant to prevent.
+
+Fixed in **1.4.0**. If you are coming from an earlier version, **empty LOST.DIR once by hand** -
+it holds nothing but clips that were already discarded.
 
 ### Surviving the ignition going off
 
