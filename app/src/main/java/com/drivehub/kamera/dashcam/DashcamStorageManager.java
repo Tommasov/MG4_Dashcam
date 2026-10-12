@@ -732,34 +732,39 @@ public final class DashcamStorageManager {
                 // lands in the report - EROFS for a mount that came up read-only, EACCES for a
                 // permission problem - which are different faults that used to arrive as the
                 // same line.
-                // Room first, and the probe second. They used to be the other way round, and
-                // on a medium with nothing left the order decided the diagnosis: the probe
-                // writes a file, a full volume cannot take one, and the app reported "not
-                // writable" - a permission fault - for a stick that was merely full. Worse, it
-                // reported it instead of ever reaching the line below that would have made
-                // room, so the one thing that could have fixed it never ran.
+                // The probe decides, and nothing is allowed to decide before it.
                 //
-                // Full is not a reason to give up before trying the one thing that helps. The
-                // loop is otherwise closed: no room means no clip, no clip means no segment
-                // completes, and retention only ever runs when one does - so the app would wait
-                // for ever for space that it is the only thing able to release.
-                long needed = bytesNeeded(context);
-                if (recordsDir.getUsableSpace() < needed) {
-                    long after = reclaimSpace(recordsDir, needed, trace);
-                    if (after < needed) {
-                        anyOutOfSpace = true;
-                        trace(trace, "no: not enough room in " + recordsDir.getAbsolutePath()
-                                + " [" + where.what + "]: " + (after / 1048576)
-                                + " MB free, " + (needed / 1048576) + " MB needed for "
-                                + REQUIRED_CLIPS_OF_ROOM + " clips");
-                        continue;
-                    }
-                }
-
+                // This has now been got wrong twice, in the same shape, with two different
+                // advisory numbers. First canWrite(), which is access(2) and was turning away
+                // sticks that recorded perfectly. Then getUsableSpace(), moved in front of the
+                // probe so that a full medium would be called full rather than unwritable - and
+                // that call returns 0 on any error at all, so "the volume is full" and "the
+                // volume could not be asked" arrive as the same number. On a stick that was
+                // merely busy, with rotations stretching to 1.7 s just before, a healthy volume
+                // with 29.8 GB free was declared out of space; the only thing standing between
+                // that and forty deleted clips was that the directory listing failed too.
+                //
+                // So: a write that actually fails is the only thing allowed to reject a volume,
+                // and a write that actually succeeds is proof that a zero reading was a lie.
                 boolean advisoryWritable = recordsDir.canWrite();
+                long needed = bytesNeeded(context);
                 String probeError = writeProbeError(recordsDir);
+                boolean outOfSpace = looksOutOfSpace(probeError);
+                if (outOfSpace) {
+                    // Now, and only now, is there a reason to delete anything: the medium has
+                    // refused a seven-byte file. Making room is the one thing that helps, and
+                    // the loop is otherwise closed - no room means no clip, no clip means no
+                    // segment completes, and retention only runs when one does.
+                    reclaimSpace(recordsDir, needed, trace);
+                    probeError = writeProbeError(recordsDir);
+                    outOfSpace = looksOutOfSpace(probeError);
+                }
                 if (probeError != null) {
-                    anyWriteTestFailed = true;
+                    if (outOfSpace) {
+                        anyOutOfSpace = true;
+                    } else {
+                        anyWriteTestFailed = true;
+                    }
                     trace(trace, "no: write probe failed in " + recordsDir.getAbsolutePath()
                             + " [" + where.what + "] (existed=" + existed
                             + " canWrite=" + advisoryWritable + " "
@@ -769,6 +774,22 @@ public final class DashcamStorageManager {
                 if (!advisoryWritable) {
                     trace(trace, "note: canWrite() said no but the write probe succeeded in "
                             + recordsDir.getAbsolutePath() + " [" + where.what + "]");
+                }
+
+                // The write went through, so a free-space figure of zero here is the number
+                // lying rather than the medium being full, and is ignored. A positive figure
+                // that is still short of a clip and a margin is worth acting on.
+                long free = recordsDir.getUsableSpace();
+                if (free > 0 && free < needed) {
+                    long after = reclaimSpace(recordsDir, needed, trace);
+                    if (after > 0 && after < needed) {
+                        anyOutOfSpace = true;
+                        trace(trace, "no: not enough room in " + recordsDir.getAbsolutePath()
+                                + " [" + where.what + "]: " + (after / 1048576)
+                                + " MB free, " + (needed / 1048576) + " MB needed for "
+                                + REQUIRED_CLIPS_OF_ROOM + " clips");
+                        continue;
+                    }
                 }
                 accepted = recordsDir;
                 acceptedWhat = where.what;
@@ -932,6 +953,22 @@ public final class DashcamStorageManager {
     }
 
     /** Returns null when the probe wrote and read back, otherwise why it did not. */
+    /**
+     * Whether a failed write failed for want of room rather than for want of permission.
+     *
+     * <p>Matched on the text, because the text is what there is: the probe hands back the
+     * exception, and the kernel's ENOSPC arrives inside it as "No space left on device"
+     * whichever exception Java wraps it in. Crude, and still sounder than the alternative - a
+     * free-space figure that reads zero when it cannot be taken at all.
+     */
+    private static boolean looksOutOfSpace(String probeError) {
+        if (probeError == null) {
+            return false;
+        }
+        String lower = probeError.toLowerCase(Locale.US);
+        return lower.contains("no space left") || lower.contains("enospc");
+    }
+
     public static String writeProbeError(File dir) {
         File probe = new File(dir, WRITE_PROBE_FILE_NAME);
         try {
