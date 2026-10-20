@@ -776,21 +776,27 @@ public final class DashcamStorageManager {
                             + recordsDir.getAbsolutePath() + " [" + where.what + "]");
                 }
 
-                // The write went through, so a free-space figure of zero here is the number
-                // lying rather than the medium being full, and is ignored. A positive figure
-                // that is still short of a clip and a margin is worth acting on.
-                long free = recordsDir.getUsableSpace();
-                if (free > 0 && free < needed) {
-                    long after = reclaimSpace(recordsDir, needed, trace);
-                    if (after > 0 && after < needed) {
-                        anyOutOfSpace = true;
-                        trace(trace, "no: not enough room in " + recordsDir.getAbsolutePath()
-                                + " [" + where.what + "]: " + (after / 1048576)
-                                + " MB free, " + (needed / 1048576) + " MB needed for "
-                                + REQUIRED_CLIPS_OF_ROOM + " clips");
-                        continue;
-                    }
-                }
+                // The write went through, so the volume is usable, and nothing below is
+                // allowed to say otherwise. There used to be a free-space check here, and it
+                // was wrong in a way that took three attempts to see.
+                //
+                // On this vehicle the free-cluster count of a FAT volume is not ready the
+                // moment it mounts: it is built while the car is starting up, and until it
+                // finishes the figure comes back low and climbing. Usually that takes about two
+                // seconds. Every few days it takes longer than a minute, and in that window a
+                // stick with 29.8 GB free reported **48 MB** - not zero, which a guard could
+                // have caught, but a number that looks entirely reasonable. The app refused the
+                // volume, showed a fault, and recorded nothing until somebody intervened.
+                //
+                // Worse, it would have deleted clips to make room that was never missing. Twice
+                // it did not, and both times the reason was luck: the directory listing was
+                // failing in the same instant, so there was nothing to delete.
+                //
+                // So the figure no longer decides anything. Space is managed where it can be
+                // measured rather than estimated: the ring buffer removes a clip at every
+                // rotation, and a medium that is genuinely full refuses a write - which is
+                // handled above, with ENOSPC, by making room and asking again. A number that
+                // may be a lie is not allowed to veto a medium that has just told the truth.
                 accepted = recordsDir;
                 acceptedWhat = where.what;
                 break;
