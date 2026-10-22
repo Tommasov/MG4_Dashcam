@@ -1909,7 +1909,15 @@ public class RecordingService extends Service {
             // Here rather than once at shutdown: the ignition can be cut at any moment, and a
             // sync that only runs when the car is switched off is a sync that runs after the
             // thing it was meant to prevent.
-            DashcamStorageManager.syncDirectory(baseDir, "retention");
+            boolean synced = DashcamStorageManager.syncDirectory(baseDir, "retention");
+            // And it says so, which it did not before. This countermeasure has been in the
+            // app since 1.4.0 against exactly the fault we are still chasing, and there was no
+            // way to tell from a report whether it had ever run: it only spoke when it failed,
+            // and retention only spoke when a clip carried a date the car could not have
+            // known. Two silences that together look identical to a stick quietly filling up.
+            DevRuntimeLog.add(TAG, String.format(Locale.US,
+                    "retention removed %d of %d clip(s), keeping %d; sync %s",
+                    deleted, groups.size(), keepSegments, synced ? "ok" : "FAILED"));
         }
     }
 
@@ -1984,10 +1992,17 @@ public class RecordingService extends Service {
      *
      * <p>It used to give up after half a minute, and that was the whole of the trouble at
      * startup. A volume that has only just been mounted turns up in StorageManager, has its
-     * directory, answers yes to canWrite() - and reports <b>zero bytes free</b>, because the
-     * free-cluster count of the FAT has not been worked out yet. Every write then fails with
-     * ENOSPC, which reads exactly like a full stick and is nothing of the sort: the same stick
-     * started by hand a minute later records perfectly.
+     * directory, answers yes to canWrite() - and reports <b>zero bytes free</b>, so every
+     * write fails with ENOSPC, which reads exactly like a full stick and is nothing of the
+     * sort: the same stick, pulled out and pushed back in, reports 29.9 GB free a second and a
+     * half later and records all afternoon.
+     *
+     * <p>That was first read as a count still being built after the mount. It is not: across
+     * five weeks of reports the figure does not climb, it decays, roughly by what gets written
+     * and never by what gets deleted, and only the filesystem check vold runs at mount time
+     * puts it back. Waiting therefore does not always help - but it costs nothing when the
+     * volume is ready at once, and the attempt that follows a wait is now also the attempt
+     * that can ask for the volume to be remounted.
      *
      * <p>So the retries now run for about two and a half minutes. It costs nothing when the
      * volume is ready at once, and nothing is reported as an error in the meantime - the wait
@@ -2058,6 +2073,18 @@ public class RecordingService extends Service {
                     attempt + 1, STORAGE_WAIT_MS.length,
                     (SystemClock.elapsedRealtime() - waitStartMs) / 1000.0,
                     lastResolveUsbState));
+            // If the resolution found a medium refusing writes for space it cannot account
+            // for, it asked for the volume to be remounted rather than for clips to be
+            // deleted. This is the place that can afford it: the loop is already waiting, the
+            // call takes the seconds vold needs for its filesystem check, and the mount
+            // broadcast will cut the next wait short. At most one per episode - VolumeRepair
+            // holds the cooldown - so the remaining attempts go to the repaired volume rather
+            // than to another unmount.
+            if (DashcamStorageManager.repairPendingVolume(this)) {
+                String repaired = "remounted the volume after a refusal it could not account for";
+                DevRuntimeLog.add("RecordingService", repaired);
+                StandbyJournal.add(this, repaired);
+            }
         }
         StandbyJournal.add(this, String.format(Locale.US,
                 "storage never became usable: gave up after %.0fs, %s",

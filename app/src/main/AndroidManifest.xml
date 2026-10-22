@@ -25,6 +25,12 @@
     <!-- Only for the one attempt at Android's own status bar API, which this car may ignore. -->
     <uses-permission android:name="android.permission.STATUS_BAR"
         tools:ignore="ProtectedPermissions" />
+    <!-- To unmount and mount a stuck USB volume again, which is the only thing known to clear
+         a medium that refuses every write while claiming to be full. See VolumeRepair: the
+         driver does it with their fingers today. Signature-level, so it is granted to this
+         platform-signed system app and to nobody else. -->
+    <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.CAMERA" />

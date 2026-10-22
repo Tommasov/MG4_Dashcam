@@ -9,12 +9,14 @@ import androidx.annotation.NonNull;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.SystemClock;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.util.Log;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -119,20 +121,23 @@ public final class DashcamStorageManager {
      * <p>fsync on a vfat directory is enough - the kernel's implementation flushes the
      * allocation table alongside it - so no native call is needed.
      */
-    static void syncDirectory(File dir, String why) {
+    static boolean syncDirectory(File dir, String why) {
         if (dir == null) {
-            return;
+            return false;
         }
         try {
             if (!CameraProbe.syncFilesystem(dir.getAbsolutePath())) {
                 DevRuntimeLog.add(TAG, "sync of " + dir.getAbsolutePath()
                         + " after " + why + " did not succeed");
+                return false;
             }
+            return true;
         } catch (Throwable t) {
             // Worth a line and nothing more: a medium that will not sync has larger problems,
             // and whatever writes to it next will say so.
             DevRuntimeLog.add(TAG, "could not sync " + dir.getAbsolutePath()
                     + " after " + why + ": " + t);
+            return false;
         }
     }
 
@@ -434,6 +439,170 @@ public final class DashcamStorageManager {
         return free;
     }
 
+    /**
+     * The volume a records directory lives on, as a directory this process can read.
+     *
+     * <p>The raw vold mount first: it is the one the clips are written through, it is the one
+     * that answers an ENOSPC, and reading it does not go through FUSE. The volume root under
+     * /storage is the fallback, and the records directory's own parent the last resort - which
+     * is the right answer anyway for the app-sandbox location, where the volume root is not
+     * ours to walk.
+     */
+    private static File volumeRootOf(UsbCandidate candidate, File recordsDir) {
+        File raw = new File(MEDIA_RW_ROOT, candidate.volumeId);
+        if (raw.isDirectory() && raw.canRead()) {
+            return raw;
+        }
+        if (candidate.rootDir != null && candidate.rootDir.canRead()) {
+            return candidate.rootDir;
+        }
+        File parent = recordsDir.getParentFile();
+        return parent != null ? parent : recordsDir;
+    }
+
+    /** Stop walking a medium after this many entries, however much is left. */
+    private static final int MEASURE_MAX_ENTRIES = 20_000;
+
+    /** And after this long, which matters more: this runs while the car waits to record. */
+    private static final long MEASURE_BUDGET_MS = 3_000L;
+
+    /**
+     * Everything on a medium that can actually be opened, as far as it could be counted.
+     *
+     * <p>{@code complete} is the whole point. A walk that ran out of entries or out of time has
+     * not measured the medium, and must not be read as "there is nothing there" - that
+     * confusion, between a directory that is empty and a directory that would not answer, is
+     * exactly what has cost us a month of guessing.
+     */
+    private static final class MediumContents {
+        final long bytes;
+        final int files;
+        final boolean complete;
+
+        MediumContents(long bytes, int files, boolean complete) {
+            this.bytes = bytes;
+            this.files = files;
+            this.complete = complete;
+        }
+
+        /**
+         * Whether a claim of {@code claimedUsed} occupied bytes is believable.
+         *
+         * <p>Half, because the question is never close. A medium genuinely full of clips
+         * accounts for its own claim within a few per cent; the fault this guards against
+         * accounts for a tenth of it - three or four gigabytes of ring buffer against a claim
+         * of twenty-nine. Anything in between has never been observed, and if it ever is, the
+         * report now carries both numbers to argue with.
+         *
+         * <p>A measurement that did not finish is not evidence, so it never licenses a
+         * deletion.
+         */
+        boolean accountsFor(long claimedUsed) {
+            return complete && bytes * 2L >= claimedUsed;
+        }
+
+        String describe(File root) {
+            if (!complete) {
+                return "could not finish counting " + root.getAbsolutePath()
+                        + " (reached " + files + " file(s), " + (bytes / 1048576)
+                        + " MB): not treating that as an empty medium";
+            }
+            return "everything that can be opened under " + root.getAbsolutePath() + " is "
+                    + files + " file(s) worth " + (bytes / 1048576) + " MB";
+        }
+    }
+
+    /**
+     * Adds up every file under a medium, breadth first, with a bound on both effort and time.
+     *
+     * <p>Iterative rather than recursive: this walks a stranger's filesystem, and the one thing
+     * known about the media this app meets is that they are sometimes in a state nobody
+     * designed for.
+     */
+    private static MediumContents measureMedium(File root) {
+        long deadline = SystemClock.elapsedRealtime() + MEASURE_BUDGET_MS;
+        ArrayDeque<File> pending = new ArrayDeque<>();
+        pending.add(root);
+        long bytes = 0L;
+        int files = 0;
+        int entries = 0;
+        while (!pending.isEmpty()) {
+            if (entries >= MEASURE_MAX_ENTRIES || SystemClock.elapsedRealtime() > deadline) {
+                return new MediumContents(bytes, files, false);
+            }
+            File[] children = pending.poll().listFiles();
+            if (children == null) {
+                // A directory that will not list is a hole in the measurement, not a zero.
+                return new MediumContents(bytes, files, false);
+            }
+            for (File child : children) {
+                entries++;
+                if (child.isDirectory()) {
+                    pending.add(child);
+                } else {
+                    files++;
+                    bytes += child.length();
+                }
+            }
+        }
+        return new MediumContents(bytes, files, true);
+    }
+
+    /** What the records directory holds right now, in one line for the report. */
+    private static String describeRecordsDir(File recordsDir) {
+        File[] entries = recordsDir.listFiles();
+        if (entries == null) {
+            return "cannot list " + recordsDir.getAbsolutePath()
+                    + ": the folder would not answer, which is not the same as empty";
+        }
+        int clips = 0;
+        int others = 0;
+        long bytes = 0L;
+        for (File entry : entries) {
+            if (entry.isFile() && entry.getName().toLowerCase(Locale.US).endsWith(CLIP_SUFFIX)) {
+                clips++;
+                bytes += entry.length();
+            } else {
+                others++;
+            }
+        }
+        return String.format(Locale.US,
+                "holds %d clip(s) worth %d MB and %d other entr%s; the volume says %d MB free"
+                        + " of %d MB",
+                clips, bytes / 1048576, others, others == 1 ? "y" : "ies",
+                recordsDir.getUsableSpace() / 1048576, recordsDir.getTotalSpace() / 1048576);
+    }
+
+    /**
+     * The volume whose refusal to be written to could not be accounted for, if any.
+     *
+     * <p>Set here, where the evidence is, and acted on by {@link #repairPendingVolume} from the
+     * service's wait loop - which is the only place that can afford to spend twenty seconds on
+     * an unmount and a filesystem check, and the only place that is already waiting for the
+     * volume to come back.
+     */
+    private static volatile String pendingRepairVolumeId;
+
+    private static void requestRepair(String volumeId, List<String> trace) {
+        pendingRepairVolumeId = volumeId;
+        trace(trace, "not deleting anything: a medium that refuses a write it cannot account"
+                + " for is a medium to be remounted, not emptied - asking for " + volumeId);
+    }
+
+    /**
+     * Acts on a repair asked for by the last resolution, at most one per wait loop.
+     *
+     * @return true if the volume was actually remounted, so the caller can say so and try again.
+     */
+    public static boolean repairPendingVolume(Context context) {
+        String volumeId = pendingRepairVolumeId;
+        if (volumeId == null) {
+            return false;
+        }
+        pendingRepairVolumeId = null;
+        return VolumeRepair.remount(context, volumeId);
+    }
+
     private static long sizeOfDirectory(File dir) {
         long total = 0L;
         File[] entries = dir.listFiles();
@@ -709,6 +878,11 @@ public final class DashcamStorageManager {
         for (UsbCandidate candidate : prioritized) {
             File accepted = null;
             String acceptedWhat = "";
+            // Measured at most once per volume per pass. The three locations tried below all
+            // live on the same medium, so without this a stick that refuses writes gets walked
+            // three times for one answer - and the wait loop asks eleven times.
+            File measuredRoot = null;
+            MediumContents measured = null;
             for (Where where : recordsDirCandidates(candidate)) {
                 File recordsDir = where.dir;
                 File parent = recordsDir.getParentFile();
@@ -751,13 +925,44 @@ public final class DashcamStorageManager {
                 String probeError = writeProbeError(recordsDir);
                 boolean outOfSpace = looksOutOfSpace(probeError);
                 if (outOfSpace) {
-                    // Now, and only now, is there a reason to delete anything: the medium has
-                    // refused a seven-byte file. Making room is the one thing that helps, and
-                    // the loop is otherwise closed - no room means no clip, no clip means no
-                    // segment completes, and retention only runs when one does.
-                    reclaimSpace(recordsDir, needed, trace);
-                    probeError = writeProbeError(recordsDir);
-                    outOfSpace = looksOutOfSpace(probeError);
+                    // The medium has refused a seven-byte file, and that used to be reason
+                    // enough to start deleting. It is not.
+                    //
+                    // On 2026-10-22 this volume reported 0 MB free of 29937 and refused the
+                    // probe with ENOSPC. It was pulled out and pushed back in, and 1.6 seconds
+                    // later reported 29905 MB free and recorded all afternoon. A remount does
+                    // not delete anything, so there was never 29 GB of anybody's files on it:
+                    // the allocation was owed to no file at all. Meanwhile the ring buffer
+                    // keeps a hundred clips - three or four gigabytes - so whenever this
+                    // happens the folder cannot possibly account for what the volume claims is
+                    // occupied, and deleting the footage changes nothing except that the
+                    // footage is gone. Up to forty clips per call, and the wait loop calls this
+                    // eleven times.
+                    //
+                    // So the refusal has to add up before anything is removed. Count what the
+                    // volume says is occupied, count what can actually be opened, and compare.
+                    File volumeRoot = volumeRootOf(candidate, recordsDir);
+                    if (measured == null || !volumeRoot.equals(measuredRoot)) {
+                        measuredRoot = volumeRoot;
+                        measured = measureMedium(volumeRoot);
+                    }
+                    MediumContents contents = measured;
+                    long total = recordsDir.getTotalSpace();
+                    long claimedUsed = total - recordsDir.getUsableSpace();
+                    trace(trace, "ENOSPC in " + recordsDir.getAbsolutePath() + ": volume claims "
+                            + (claimedUsed / 1048576) + " MB of " + (total / 1048576)
+                            + " MB occupied; " + contents.describe(volumeRoot));
+                    if (contents.accountsFor(claimedUsed)) {
+                        // The medium really is full of files somebody can open, and the oldest
+                        // clips are ours to recycle. Making room is the one thing that helps,
+                        // and the loop is otherwise closed - no room means no clip, no clip
+                        // means no segment completes, and retention only runs when one does.
+                        reclaimSpace(recordsDir, needed, trace);
+                        probeError = writeProbeError(recordsDir);
+                        outOfSpace = looksOutOfSpace(probeError);
+                    } else {
+                        requestRepair(candidate.volumeId, trace);
+                    }
                 }
                 if (probeError != null) {
                     if (outOfSpace) {
@@ -780,23 +985,24 @@ public final class DashcamStorageManager {
                 // allowed to say otherwise. There used to be a free-space check here, and it
                 // was wrong in a way that took three attempts to see.
                 //
-                // On this vehicle the free-cluster count of a FAT volume is not ready the
-                // moment it mounts: it is built while the car is starting up, and until it
-                // finishes the figure comes back low and climbing. Usually that takes about two
-                // seconds. Every few days it takes longer than a minute, and in that window a
-                // stick with 29.8 GB free reported **48 MB** - not zero, which a guard could
-                // have caught, but a number that looks entirely reasonable. The app refused the
-                // volume, showed a fault, and recorded nothing until somebody intervened.
+                // The figure this volume reports for free space is not to be trusted at all. It
+                // was first read as a count that had not finished being built - low and
+                // climbing for a second or two after the mount - and that reading is wrong:
+                // measured across five weeks of reports it does not climb, it decays. Right
+                // after a mount the volume says 29.9 GB free; a week of driving later it says
+                // 47 MB, having been written to about that much in total while the ring buffer
+                // deleted all but a hundred clips. It behaves like a counter that is charged
+                // for everything written and credited for nothing deleted, and the only thing
+                // that resets it is the filesystem check vold runs when the volume is mounted.
                 //
-                // Worse, it would have deleted clips to make room that was never missing. Twice
-                // it did not, and both times the reason was luck: the directory listing was
-                // failing in the same instant, so there was nothing to delete.
+                // On a figure like that, a threshold is worthless and arithmetic is worse: it
+                // nearly deleted forty clips to make room that was never missing. Twice it did
+                // not, and both times the reason was luck - the directory listing was failing
+                // in the same instant, so there was nothing to delete.
                 //
-                // So the figure no longer decides anything. Space is managed where it can be
-                // measured rather than estimated: the ring buffer removes a clip at every
-                // rotation, and a medium that is genuinely full refuses a write - which is
-                // handled above, with ENOSPC, by making room and asking again. A number that
-                // may be a lie is not allowed to veto a medium that has just told the truth.
+                // So the figure decides nothing here. A write that succeeds is proof the medium
+                // is usable; a write that fails with ENOSPC is handled above, by measuring
+                // whether the refusal can be accounted for before anything is removed.
                 accepted = recordsDir;
                 acceptedWhat = where.what;
                 break;
@@ -808,6 +1014,12 @@ public final class DashcamStorageManager {
             }
             trace(trace, "accepted: " + accepted.getAbsolutePath()
                     + " [" + acceptedWhat + "]");
+            // The one line the report was missing for a month. Every frame was timed to a
+            // tenth of a millisecond while nothing said how many clips were on the stick or
+            // what they weighed, which is the only pair of numbers that can tell a full medium
+            // apart from a medium that merely says so.
+            trace(trace, "  " + describeRecordsDir(accepted));
+            trace(trace, "  " + VolumeRepair.describe(context, candidate.volumeId));
             usable.add(accepted);
         }
         if (usable.size() == 1) {
