@@ -348,7 +348,8 @@ public final class DashcamStorageManager {
         }
         int deleted = 0;
         for (File entry : entries) {
-            if (entry.isFile() && entry.getName().endsWith(CLIP_SUFFIX) && entry.delete()) {
+            if (entry.isFile() && entry.getName().endsWith(CLIP_SUFFIX)
+                    && deleteFreeingSpace(entry)) {
                 deleted++;
             }
         }
@@ -426,7 +427,7 @@ public final class DashcamStorageManager {
             if (free >= needed || deleted >= MAX_RECLAIM_DELETIONS) {
                 break;
             }
-            if (clip.delete()) {
+            if (deleteFreeingSpace(clip)) {
                 deleted++;
             }
             free = dir.getUsableSpace();
@@ -601,6 +602,132 @@ public final class DashcamStorageManager {
         }
         pendingRepairVolumeId = null;
         return VolumeRepair.remount(context, volumeId);
+    }
+
+    /** Said once if emptying a file before deleting it ever fails, and then not again. */
+    private static boolean truncateComplained;
+
+    /**
+     * Removes a file and gives its space back, which on this car are two different things.
+     *
+     * <p>Measured on 2026-10-23, with chkdsk reading the stick itself: <b>244 lost cluster
+     * chains, 7827392 KB, 32079 KB each</b> - one deleted clip apiece, to within the 16 KB
+     * cluster. The directory entry goes, the chain stays allocated, and the volume's free count
+     * is never credited. Nothing of ours was failing: the ring buffer had deleted those 244
+     * clips and syncfs had reported success 244 times, which is in the report.
+     *
+     * <p>So the file is emptied before it is unlinked. Opening it for writing truncates it,
+     * which reaches the allocation table by a different road than unlink takes, and the fsync
+     * that follows pushes that road's result onto the medium while there is still a name
+     * pointing at the file. If that road works the space comes back at every rotation.
+     *
+     * <p>If this driver breaks that road too, nothing here will say so - which is why it is not
+     * the only defence. {@link #repairIfFillingWithGhosts} has the volume remounted before it
+     * can fill, and the rotation line in the report carries the free space before and after, so
+     * one line of the next report says which of the two did the work.
+     */
+    static boolean deleteFreeingSpace(File file) {
+        if (file == null) {
+            return false;
+        }
+        if (file.isFile() && file.length() > 0L) {
+            try (FileOutputStream out = new FileOutputStream(file)) {
+                out.getFD().sync();
+            } catch (Throwable t) {
+                if (!truncateComplained) {
+                    truncateComplained = true;
+                    DevRuntimeLog.add(TAG, "could not empty " + file.getName()
+                            + " before deleting it: " + t);
+                }
+            }
+        }
+        return file.delete();
+    }
+
+    /** Below a quarter of itself free, a volume is near enough to refusing writes. */
+    private static final long GHOSTS_FREE_DIVISOR = 4L;
+
+    /** And a gigabyte owed to no file is what makes the shortage ghosts rather than footage. */
+    private static final long GHOSTS_MIN_BYTES = 1024L * 1024L * 1024L;
+
+    /**
+     * Has the volume remounted if it is filling with allocation that belongs to no file.
+     *
+     * <p>This is the defence that does not depend on understanding the driver. The medium
+     * tolerates about 29.9 GB of writing per mount - measured: 29773 MB consumed over 470
+     * recorded minutes between 11 and 15 October, which is 63.3 MB a minute against the 63.4
+     * MB a minute we actually write - and then refuses everything. What puts it right is a
+     * mount: on 22 October a remount freed 29 GB in 1.6 seconds, because vold checks the
+     * filesystem before mounting and a check reclaims chains nobody owns.
+     *
+     * <p>So rather than waiting for the refusal and reporting a fault for the rest of the
+     * drive, the volume is remounted while nothing is recording yet, with gigabytes of margin
+     * still in hand. The two conditions are both needed: short of space says it matters soon,
+     * and a gap between what the volume claims is occupied and what can actually be opened says
+     * the shortage is not somebody's files. A stick genuinely filling up with footage accounts
+     * for its own claim and is left alone - the ring buffer is what handles that.
+     *
+     * @return true if the volume was remounted, so the caller resolves again before recording.
+     */
+    public static boolean repairIfFillingWithGhosts(Context context, File recordsDir) {
+        if (context == null || recordsDir == null) {
+            return false;
+        }
+        String serial = volumeSerialOfRecordsDir(recordsDir);
+        if (serial == null) {
+            return false;
+        }
+        long total = recordsDir.getTotalSpace();
+        long free = recordsDir.getUsableSpace();
+        if (total <= 0L || free > total / GHOSTS_FREE_DIVISOR) {
+            return false;
+        }
+        File root = recordsDir.getParentFile();
+        if (root == null) {
+            return false;
+        }
+        MediumContents contents = measureMedium(root);
+        if (!contents.complete) {
+            // Not evidence, so not a reason to unmount a volume that is about to record.
+            DevRuntimeLog.add(TAG, "volume is short of space but " + contents.describe(root));
+            return false;
+        }
+        long gap = (total - free) - contents.bytes;
+        if (gap < GHOSTS_MIN_BYTES) {
+            DevRuntimeLog.add(TAG, String.format(Locale.US,
+                    "volume is down to %d MB free of %d MB and its own files account for it"
+                            + " (%d file(s), %d MB): leaving it to the ring buffer",
+                    free / 1048576, total / 1048576, contents.files, contents.bytes / 1048576));
+            return false;
+        }
+        DevRuntimeLog.add(TAG, String.format(Locale.US,
+                "volume is down to %d MB free of %d MB with %d MB owed to no file"
+                        + " (%d file(s) account for %d MB): remounting before recording",
+                free / 1048576, total / 1048576, gap / 1048576,
+                contents.files, contents.bytes / 1048576));
+        return VolumeRepair.remount(context, serial);
+    }
+
+    /**
+     * The FAT serial of the volume a records directory sits on, or null if it is not on one.
+     *
+     * <p>The serial is the directory name of both mounts - /mnt/media_rw/C598-441B and
+     * /storage/C598-441B - so the records directory's parent carries it. Internal storage and
+     * the app-sandbox location are two levels deeper or somewhere else entirely, and neither is
+     * a volume anybody can remount, so they come back null rather than guessed at.
+     */
+    private static String volumeSerialOfRecordsDir(File recordsDir) {
+        File parent = recordsDir.getParentFile();
+        File grandparent = parent == null ? null : parent.getParentFile();
+        if (grandparent == null) {
+            return null;
+        }
+        String root = grandparent.getAbsolutePath();
+        if (!root.equals(MEDIA_RW_ROOT.getAbsolutePath())
+                && !root.equals(LEGACY_STORAGE_ROOT.getAbsolutePath())) {
+            return null;
+        }
+        return parent.getName();
     }
 
     private static long sizeOfDirectory(File dir) {

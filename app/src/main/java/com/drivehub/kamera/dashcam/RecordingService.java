@@ -1298,7 +1298,7 @@ public class RecordingService extends Service {
         try {
             if (outputFile != null && outputFile.exists()) {
                 long size = outputFile.length();
-                if (outputFile.delete()) {
+                if (DashcamStorageManager.deleteFreeingSpace(outputFile)) {
                     DevRuntimeLog.add("RecordingService",
                             "discarded unreadable clip " + outputFile.getName()
                                     + " (" + size + " bytes)");
@@ -1880,6 +1880,7 @@ public class RecordingService extends Service {
         int deleteCount = groups.size() - keepSegments;
 
         int deleted = 0;
+        long freeBefore = baseDir.getUsableSpace();
         for (int i = 0; i < groups.size() && deleted < deleteCount; i++) {
             String base = groups.get(i).getKey();
             if (protectedBases != null && protectedBases.contains(base)) {
@@ -1887,14 +1888,17 @@ public class RecordingService extends Service {
             }
             File combinedFile = new File(baseDir, base + ".mp4");
             if (combinedFile.exists()) {
+                // Emptied before it is unlinked. See DashcamStorageManager.deleteFreeingSpace:
+                // on this car unlink takes the name and leaves the clusters allocated, one
+                // orphaned chain per deleted clip, until the stick refuses every write.
                 // noinspection ResultOfMethodCallIgnored
-                combinedFile.delete();
+                DashcamStorageManager.deleteFreeingSpace(combinedFile);
             } else {
                 char[] suffixes = new char[] { 'F', 'R', 'X', 'Y' };
                 for (char s : suffixes) {
                     File f = new File(baseDir, base + "_" + s + ".mp4");
                     // noinspection ResultOfMethodCallIgnored
-                    f.delete();
+                    DashcamStorageManager.deleteFreeingSpace(f);
                 }
             }
             deleted++;
@@ -1915,9 +1919,16 @@ public class RecordingService extends Service {
             // way to tell from a report whether it had ever run: it only spoke when it failed,
             // and retention only spoke when a clip carried a date the car could not have
             // known. Two silences that together look identical to a stick quietly filling up.
+            // The free space before and after is the whole question on this car, and one
+            // rotation answers it: a medium that credits a deletion gains about 31 MB here,
+            // and one that does not gains nothing while the clip is gone all the same.
+            long freeAfter = baseDir.getUsableSpace();
             DevRuntimeLog.add(TAG, String.format(Locale.US,
-                    "retention removed %d of %d clip(s), keeping %d; sync %s",
-                    deleted, groups.size(), keepSegments, synced ? "ok" : "FAILED"));
+                    "retention removed %d of %d clip(s), keeping %d; sync %s;"
+                            + " free %d -> %d MB (%+d)",
+                    deleted, groups.size(), keepSegments, synced ? "ok" : "FAILED",
+                    freeBefore / 1048576, freeAfter / 1048576,
+                    (freeAfter - freeBefore) / 1048576));
         }
     }
 
@@ -1964,7 +1975,9 @@ public class RecordingService extends Service {
                 }
             }
         }
-        return f.delete();
+        // Event folders hold copies of clips, so they leak their clusters exactly as the ring
+        // buffer's do.
+        return DashcamStorageManager.deleteFreeingSpace(f);
     }
 
     private File getEventsBaseDir() {
@@ -2051,6 +2064,16 @@ public class RecordingService extends Service {
             }
             boolean lastTry = attempt == STORAGE_WAIT_MS.length - 1;
             File dir = resolveActiveBaseDir(true, lastTry);
+            if (dir != null && activeBaseIsUsb
+                    && DashcamStorageManager.repairIfFillingWithGhosts(this, dir)) {
+                // The volume was filling with allocation owed to no file, and has just been
+                // remounted. Resolve again rather than record into a path from before the
+                // remount: the next turn of this loop is a second or two away, and the mount
+                // broadcast usually wakes it sooner.
+                StandbyJournal.add(this,
+                        "remounted the volume before recording: it was filling with ghosts");
+                continue;
+            }
             if (dir != null) {
                 String line = String.format(Locale.US,
                         "storage ready on attempt %d/%d after %.1fs",
