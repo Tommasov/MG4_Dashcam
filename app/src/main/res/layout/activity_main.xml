@@ -133,6 +133,23 @@
             android:maxWidth="@dimen/text_measure_max"
             android:text="@string/dashcam_enabled_summary" />
 
+        <!-- Second thing on the screen, under the switch that turns the dashcam on and above
+             everything else, because the moment it is wanted is a moment of some urgency:
+             somebody is standing at the car wanting the last two minutes of footage off it. A
+             button for that at the bottom of a settings page is a button that gets looked for
+             while the thing worth filming is still happening. -->
+        <Button
+            android:id="@+id/btnExtraction"
+            style="@style/GradientButton"
+            android:layout_width="match_parent"
+            android:layout_marginTop="@dimen/row_gap"
+            android:text="@string/extraction_enter" />
+
+        <TextView
+            style="@style/Hint"
+            android:maxWidth="@dimen/text_measure_max"
+            android:text="@string/extraction_enter_summary" />
+
         <!-- Directly under the loop switch, and not in a section further down, because a
              setting nobody finds is a setting nobody has. It belongs next to this one anyway:
              one turns the recording on, the other is how you can tell from the driver's seat

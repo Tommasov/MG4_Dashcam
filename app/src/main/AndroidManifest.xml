@@ -31,6 +31,17 @@
          platform-signed system app and to nobody else. -->
     <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS"
         tools:ignore="ProtectedPermissions" />
+    <!-- Extraction. The access point's name and passphrase are read so the car can draw a QR
+         code the phone simply scans, and the access point is switched on for the length of the
+         phase and off again afterwards. All four are granted by the platform signature; a
+         probe app measured on 2026-09-24 which of them this head unit honours. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.TETHER_PRIVILEGED"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.OVERRIDE_WIFI_CONFIG"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -74,6 +85,18 @@
             android:name=".dashcam.RecordingService"
             android:exported="false"
             android:foregroundServiceType="camera" />
+
+        <activity
+            android:name=".extract.ExtractionActivity"
+            android:exported="false"
+            android:label="@string/extraction_title" />
+
+        <!-- dataSync: for the length of the phase this service exists to move files onto a
+             phone. The type matters only where the platform demands one; this car is API 28. -->
+        <service
+            android:name=".extract.ExtractionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <receiver
             android:name=".boot.BootReceiver"

@@ -44,8 +44,8 @@ android {
         applicationId "com.tommasov.mg4dashcam"
         minSdk 28
         targetSdk 36
-        versionCode 118
-        versionName "1.4.3"
+        versionCode 119
+        versionName "1.5.0-beta.1"
         // Where the update manifests live, one per channel, as in the launcher.
         buildConfigField "String", "UPDATE_BASE_URL",
                 "\"https://ws2.tommasovietina.it/mg4/MG4_Dashcam/\""
@@ -122,6 +122,10 @@ dependencies {
     implementation libs.material
     implementation libs.activity
     implementation libs.constraintlayout
+    // The QR code on the extraction screen. Pure Java, Apache-2.0, and the reference
+    // implementation of the format: a hand-written encoder would be Reed-Solomon code nobody
+    // here can check by eye.
+    implementation 'com.google.zxing:core:3.5.3'
     testImplementation libs.junit
     androidTestImplementation libs.ext.junit
     androidTestImplementation libs.espresso.core

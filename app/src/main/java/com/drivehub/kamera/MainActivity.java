@@ -5,6 +5,8 @@ import com.drivehub.kamera.dashcam.DashcamStorageManager;
 import com.drivehub.kamera.dashcam.RecordingService;
 import com.drivehub.kamera.dev.CrashTrail;
 import com.drivehub.kamera.dev.DevRuntimeLog;
+import com.drivehub.kamera.extract.ExtractionActivity;
+import com.drivehub.kamera.extract.ExtractionService;
 import com.drivehub.kamera.dev.StandbyJournal;
 import com.drivehub.kamera.update.ApkDownloader;
 import com.drivehub.kamera.update.ApkInstaller;
@@ -143,6 +145,23 @@ public class MainActivity extends AppCompatActivity {
 
         // Stops the loop and waits for the pending writes so the stick can be pulled without
         // truncating the clip that was in flight.
+        // Extraction. The recording stops first and it stops through the switch, which is
+        // the one path that knows what stopping means - the same path a finger on the toggle
+        // takes. Pressing this while recording stops it anyway: that was the decision, and it
+        // is better than refusing and explaining.
+        findViewById(R.id.btnExtraction).setOnClickListener(v -> {
+            boolean wasRecording = DashcamSettings.isEnabled(prefs());
+            if (wasRecording) {
+                // Not with the syncing guard the eject button uses: that guard exists to stop
+                // the listener running, and the listener is the thing that stops the service.
+                // Guarded, this would have set a preference, moved a switch, and left the
+                // cameras recording straight through the extraction phase.
+                swEnabled.setChecked(false);
+            }
+            ExtractionService.enter(this, wasRecording);
+            startActivity(new Intent(this, ExtractionActivity.class));
+        });
+
         findViewById(R.id.btnEjectUsb).setOnClickListener(v -> {
             DashcamSettings.setEnabled(prefs(), false);
             syncing = true;

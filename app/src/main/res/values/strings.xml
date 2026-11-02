@@ -189,4 +189,25 @@
     <string name="status_icon_side_right">Right of the climate strip</string>
     <string name="stop_recording_question">Stop recording?</string>
     <string name="stop_recording_confirm">Stop</string>
+    <!-- Extraction -->
+    <string name="extraction_enter">Estrazione filmati</string>
+    <string name="extraction_enter_summary">Ferma la registrazione, accende la hotspot dell\'auto e mostra un QR per collegare il telefono.</string>
+    <string name="extraction_title">Estrazione filmati</string>
+    <string name="extraction_leave">Esci dall\'estrazione</string>
+    <string name="extraction_qr_description">Codice QR per collegarsi alla hotspot dell\'auto</string>
+    <string name="extraction_qr_hint">Inquadra il codice col telefono per entrare nella rete, poi apri l\'indirizzo qui sotto.</string>
+    <string name="extraction_network">Rete: %1$s</string>
+    <string name="extraction_network_with_password">Rete: %1$s · password: %2$s</string>
+    <string name="extraction_state_starting">Avvio in corso…</string>
+    <string name="extraction_state_ready">Pronta. La registrazione è ferma.</string>
+    <string name="extraction_state_ready_requests">Pronta · %1$d richieste dal telefono</string>
+    <string name="extraction_state_waiting_hotspot">Server pronto, hotspot ancora spenta.</string>
+    <string name="extraction_state_failed">Non è stato possibile avviare l\'estrazione.</string>
+    <string name="extraction_state_over">Fase terminata.</string>
+    <string name="extraction_turn_hotspot_on">Accendi la hotspot dalle impostazioni dell\'auto: l\'indirizzo comparirà da sé.</string>
+    <string name="extraction_no_medium">Nessun supporto leggibile: non c\'è niente da consegnare.</string>
+    <string name="extraction_no_socket">Il sistema non consente di aprire una porta su questa testata.</string>
+    <string name="extraction_explainer">La registrazione riprende da sé quando esci, quando l\'auto si muove o dopo dieci minuti in cui il telefono non chiede nulla. Il telefono collegato naviga con i dati dell\'auto.</string>
+    <string name="notification_channel_extraction">Estrazione filmati</string>
+    <string name="notification_extraction">Estrazione in corso: registrazione ferma</string>
 </resources>

@@ -9,6 +9,14 @@
 
     <!-- SAIC blue: the accent on the factory launcher. -->
     <color name="accent">#056eff</color>
+
+    <!-- The extraction button, and nothing else in the app. Starts on the accent so it still
+         belongs to this software, and ends on a violet the head unit uses nowhere, so that the
+         one button that changes what the car is doing cannot be hit by accident. -->
+    <color name="extraction_gradient_start">#056eff</color>
+    <color name="extraction_gradient_end">#5b2cf0</color>
+    <color name="extraction_gradient_start_pressed">#0455cc</color>
+    <color name="extraction_gradient_end_pressed">#4a23c7</color>
     <color name="accent_pressed">#0455cc</color>
 
     <!-- The stock side dock is #f2f2f2 by day (SystemUI dockbar_bg_color). A full-screen panel
