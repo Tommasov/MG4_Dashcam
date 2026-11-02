@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The extraction screen, read from arm's length while standing next to the car.
+
+    The QR code is the whole point and gets the room: scanning it joins the car's access point,
+    and then the address below is typed into the phone's browser. The network name, the password
+    and the address are all written out in full underneath, because a QR code that will not scan
+    in the sun has to leave somebody a way through rather than a dead end.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/extraction_title"
+            android:textColor="@color/text_primary"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvExtractionState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/secondary_text_size" />
+
+        <TextView
+            android:id="@+id/tvExtractionTrouble"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/warning"
+            android:textSize="@dimen/secondary_text_size"
+            android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/ivExtractionQr"
+            android:layout_width="360dp"
+            android:layout_height="360dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="16dp"
+            android:background="#ffffff"
+            android:contentDescription="@string/extraction_qr_description"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvExtractionQrHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/extraction_qr_hint"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/secondary_text_size"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvExtractionNetwork"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp" />
+
+        <TextView
+            android:id="@+id/tvExtractionUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/accent"
+            android:textIsSelectable="true"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/extraction_explainer"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/secondary_text_size" />
+
+        <Button
+            android:id="@+id/btnExtractionLeave"
+            style="@style/GradientButton"
+            android:layout_width="match_parent"
+            android:layout_marginTop="24dp"
+            android:text="@string/extraction_leave" />
+    </LinearLayout>
+</ScrollView>
