@@ -118,18 +118,26 @@
          ask of somebody who is glancing. -->
     <!-- Sized like the dialog buttons rather than the tonal ones: this is pressed while
          standing beside the car, often with a phone already in the other hand. -->
-    <style name="GradientButton" parent="Widget.AppCompat.Button.Borderless">
+    <style name="ExtractionButton" parent="Widget.AppCompat.Button.Borderless">
         <!-- Width and height belong here, as they do in TonalButton. Left to the layouts, the
              first use of this style shipped a screen that could not be inflated at all: an
              AppCompat widget style supplies no layout parameters, so a Button carrying only a
              width throws "You must supply a layout_height attribute" the moment the activity
-             opens. Here, nothing using this style can forget them. -->
-        <item name="android:layout_width">match_parent</item>
+             opens. Here, nothing using this style can forget them.
+
+             Wide enough for its words and no wider. This screen is 1778px across: a button
+             spanning all of it stopped reading as a button and started reading as a coloured
+             band across the page. The padding is what gives it the size a thumb needs. A
+             screen whose whole purpose is one action - the extraction screen and its way out -
+             still asks for match_parent in its own layout. -->
+        <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:background">@drawable/bg_gradient_button</item>
-        <item name="android:minHeight">@dimen/gradient_button_height</item>
+        <item name="android:paddingStart">@dimen/extraction_button_padding_h</item>
+        <item name="android:paddingEnd">@dimen/extraction_button_padding_h</item>
+        <item name="android:background">@drawable/bg_extraction_button</item>
+        <item name="android:minHeight">@dimen/extraction_button_height</item>
         <item name="android:textAllCaps">false</item>
-        <item name="android:textColor">#ffffff</item>
+        <item name="android:textColor">@color/extraction_button_text</item>
         <item name="android:textSize">24sp</item>
         <item name="android:textStyle">bold</item>
     </style>

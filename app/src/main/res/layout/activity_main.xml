@@ -140,8 +140,8 @@
              while the thing worth filming is still happening. -->
         <Button
             android:id="@+id/btnExtraction"
-            style="@style/GradientButton"
-            android:layout_width="match_parent"
+            style="@style/ExtractionButton"
+            android:layout_width="wrap_content"
             android:layout_marginTop="@dimen/row_gap"
             android:text="@string/extraction_enter" />
 

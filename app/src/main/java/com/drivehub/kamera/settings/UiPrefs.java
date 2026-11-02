@@ -106,13 +106,18 @@ public final class UiPrefs {
     /**
      * Whether to put a dot in the head unit's own status bar.
      *
-     * <p>Off by default, and left to the driver rather than decided here. The factory bar has no
-     * way of taking an icon from another app, so showing one means drawing over it - which works
-     * and looks right, and is also the most conspicuous thing this app does. Somebody who would
-     * rather the car looked untouched should not have to switch it off.
+     * <p>On by default. The factory bar has no way of taking an icon from another app, so
+     * showing one means drawing over it - which works, looks right, and is the most conspicuous
+     * thing this app does; that is why it was off to begin with, on the grounds that somebody
+     * who would rather the car looked untouched should not have to switch it off.
+     *
+     * <p>The wrong way round, as a fresh install showed: without the dot there is nothing on
+     * screen that says whether the car is recording, and a dashcam you have to open an app to
+     * trust is a dashcam you stop trusting. Anybody who wants the bar back as the factory left
+     * it has one switch to find, and it is on the first screen.
      */
     public static boolean isStatusBarIcon(SharedPreferences prefs) {
-        return prefs.getBoolean(KEY_STATUS_BAR_ICON, false);
+        return prefs.getBoolean(KEY_STATUS_BAR_ICON, true);
     }
 
     /**

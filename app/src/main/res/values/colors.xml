@@ -10,13 +10,17 @@
     <!-- SAIC blue: the accent on the factory launcher. -->
     <color name="accent">#056eff</color>
 
-    <!-- The extraction button, and nothing else in the app. Starts on the accent so it still
-         belongs to this software, and ends on a violet the head unit uses nowhere, so that the
-         one button that changes what the car is doing cannot be hit by accident. -->
-    <color name="extraction_gradient_start">#056eff</color>
-    <color name="extraction_gradient_end">#5b2cf0</color>
-    <color name="extraction_gradient_start_pressed">#0455cc</color>
-    <color name="extraction_gradient_end_pressed">#4a23c7</color>
+    <!-- The extraction button, and nothing else in the app. The car's own switches, by day,
+         are indigo: switch_track_on.png from the vehicle's settings app is itself a gradient,
+         and this is the colour at its left edge. A flat fill rather than a gradient of our own
+         invention - the button has to look like a part of this car that happens to be a button,
+         and the indigo is already doing that work for every toggle on the screen.
+
+         Pressed is the same indigo at 82%, the proportion the accent above already uses. -->
+    <color name="extraction_button">#494dc8</color>
+    <color name="extraction_button_pressed">#3c3fa4</color>
+    <!-- Dark by night, the way the status pills invert: see the night palette. -->
+    <color name="extraction_button_text">#ffffff</color>
     <color name="accent_pressed">#0455cc</color>
 
     <!-- The stock side dock is #f2f2f2 by day (SystemUI dockbar_bg_color). A full-screen panel

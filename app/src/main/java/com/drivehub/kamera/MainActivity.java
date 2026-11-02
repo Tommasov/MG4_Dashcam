@@ -68,6 +68,9 @@ public class MainActivity extends AppCompatActivity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
 
+    /** Up while an update is being fetched; held so it can be taken down from anywhere. */
+    private AlertDialog updateProgressDialog;
+
     private SwitchCompat swEnabled;
     private TextView tvStatus;
     private TextView tvStatusDetail;
@@ -443,11 +446,26 @@ public class MainActivity extends AppCompatActivity {
 
     private void downloadUpdate(UpdateInfo info) {
         TextView details = findViewById(R.id.tvStorageDetails);
+        // Where the finger just was, and not at the foot of the page. The percentage went only
+        // to the diagnostics line at the bottom of this screen, which on a page scrolled
+        // anywhere is not on the screen at all: pressing "install" looked like it had done
+        // nothing, for as long as several megabytes take to arrive. The line still gets its
+        // copy, because a report wants it. This dialog is the one the driver sees: it cannot
+        // be dismissed by accident, and it goes away by itself - when the installer takes
+        // over, or when the download ends badly and says why.
+        updateProgressDialog = Dialogs.builder(this)
+                .setTitle(R.string.update_progress_title)
+                .setMessage(getString(R.string.update_downloading, 0))
+                .setCancelable(false)
+                .create();
+        updateProgressDialog.show();
         ApkDownloader downloader = new ApkDownloader(this);
         downloader.start(info, new ApkDownloader.Callback() {
             @Override
             public void onProgress(int percent) {
-                details.setText(getString(R.string.update_downloading, percent));
+                String line = getString(R.string.update_downloading, percent);
+                details.setText(line);
+                showUpdateProgress(line);
             }
 
             @Override
@@ -463,6 +481,7 @@ public class MainActivity extends AppCompatActivity {
                             //noinspection ResultOfMethodCallIgnored
                             apk.delete();
                             details.setText(R.string.update_checksum_failed);
+                            showUpdateProblem(getString(R.string.update_checksum_failed));
                             return;
                         }
                         // Said before the handover, not after: committing the install
@@ -471,6 +490,10 @@ public class MainActivity extends AppCompatActivity {
                         // app has just been told to do something - so it owes an explanation
                         // in advance rather than an apology afterwards.
                         details.setText(R.string.update_installing_will_restart);
+                        // Left standing, not dismissed: the installer comes up on top within
+                        // the second, and what is underneath it should be the sentence that
+                        // explains why the app is about to vanish.
+                        showUpdateProgress(getString(R.string.update_installing_will_restart));
                         DashcamUpdates.installVerified(MainActivity.this, apk);
                     });
                 });
@@ -479,8 +502,43 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onFailed(String reason) {
                 details.setText(getString(R.string.update_download_failed, reason));
+                showUpdateProblem(getString(R.string.update_download_failed, reason));
             }
         });
+    }
+
+    /** Rewrites the progress dialog's line, if it is still the thing on screen. */
+    private void showUpdateProgress(String text) {
+        AlertDialog dialog = updateProgressDialog;
+        if (dialog != null && dialog.isShowing()) {
+            dialog.setMessage(text);
+        }
+    }
+
+    private void dismissUpdateProgress() {
+        AlertDialog dialog = updateProgressDialog;
+        updateProgressDialog = null;
+        if (dialog != null && dialog.isShowing()) {
+            dialog.dismiss();
+        }
+    }
+
+    /**
+     * An update that ended badly says so where it was started from.
+     *
+     * <p>Not a toast: this is the end of something the driver asked for and waited through, and
+     * it has to survive being read a few seconds late.
+     */
+    private void showUpdateProblem(String text) {
+        dismissUpdateProgress();
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        Dialogs.builder(this)
+                .setTitle(R.string.update_progress_title)
+                .setMessage(text)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
 
@@ -519,6 +577,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // The download outlives this screen - DownloadManager is doing it - but its dialog
+        // must not: a window still attached to a destroyed activity is a leak.
+        dismissUpdateProgress();
         ioExecutor.shutdownNow();
         super.onDestroy();
     }

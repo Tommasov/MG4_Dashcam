@@ -160,6 +160,7 @@
     <string name="update_up_to_date">Already up to date.</string>
     <string name="update_check_failed">Could not check for updates: %1$s</string>
     <string name="update_checking">Checking…</string>
+    <string name="update_progress_title">Update</string>
     <string name="update_downloading">Downloading %1$d%%</string>
     <string name="update_download_failed">Download failed: %1$s</string>
     <string name="update_checksum_failed">The downloaded file does not match its checksum. Nothing was installed.</string>

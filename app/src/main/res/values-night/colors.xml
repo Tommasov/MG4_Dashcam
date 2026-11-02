@@ -13,6 +13,19 @@
     <color name="accent">#7fb0ff</color>
     <color name="accent_pressed">#5d95e6</color>
 
+    <!-- The extraction button follows the car's switches here too, and at night those are a
+         different colour entirely: drawable-night/switch_track_on.png is a flat teal, #44ccd4,
+         where the day track is indigo. This is that teal exactly.
+
+         Which is why the label turns dark, like the status pills below: white on #44ccd4 reads
+         at about 1.9:1, where text at arm's length wants 4.5:1, while #1c1c1c on it reaches
+         8.7:1. The accent above is no help either - it is light, made for text on charcoal.
+
+         Pressed is the teal at 82%, as by day. -->
+    <color name="extraction_button">#44ccd4</color>
+    <color name="extraction_button_pressed">#38a7ae</color>
+    <color name="extraction_button_text">#1c1c1c</color>
+
     <!-- The stock dock at night is #1c1c1c, same reasoning as the day value. -->
     <color name="surface">#1c1c1c</color>
 

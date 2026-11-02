@@ -37,8 +37,9 @@
          between them - which is the wrong thing to hand somebody who is driving. -->
     <dimen name="choice_row_gap">48dp</dimen>
     <dimen name="row_gap">18dp</dimen>
-    <dimen name="gradient_button_radius">16dp</dimen>
-    <dimen name="gradient_button_height">88dp</dimen>
+    <dimen name="extraction_button_radius">16dp</dimen>
+    <dimen name="extraction_button_height">88dp</dimen>
+    <dimen name="extraction_button_padding_h">56dp</dimen>
     <dimen name="section_gap">36dp</dimen>
 
     <dimen name="button_radius">10dp</dimen>

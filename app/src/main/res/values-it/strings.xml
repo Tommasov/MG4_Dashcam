@@ -159,6 +159,7 @@
     <string name="update_up_to_date">Già aggiornata.</string>
     <string name="update_check_failed">Controllo non riuscito: %1$s</string>
     <string name="update_checking">Controllo in corso…</string>
+    <string name="update_progress_title">Aggiornamento</string>
     <string name="update_downloading">Scaricamento %1$d%%</string>
     <string name="update_download_failed">Scaricamento non riuscito: %1$s</string>
     <string name="update_checksum_failed">Il file scaricato non corrisponde alla sua impronta. Non è stato installato niente.</string>
