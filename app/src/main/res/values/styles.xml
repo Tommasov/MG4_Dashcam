@@ -119,6 +119,13 @@
     <!-- Sized like the dialog buttons rather than the tonal ones: this is pressed while
          standing beside the car, often with a phone already in the other hand. -->
     <style name="GradientButton" parent="Widget.AppCompat.Button.Borderless">
+        <!-- Width and height belong here, as they do in TonalButton. Left to the layouts, the
+             first use of this style shipped a screen that could not be inflated at all: an
+             AppCompat widget style supplies no layout parameters, so a Button carrying only a
+             width throws "You must supply a layout_height attribute" the moment the activity
+             opens. Here, nothing using this style can forget them. -->
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="android:background">@drawable/bg_gradient_button</item>
         <item name="android:minHeight">@dimen/gradient_button_height</item>
         <item name="android:textAllCaps">false</item>
